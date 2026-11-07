@@ -1,6 +1,6 @@
 #pragma once
 // ==========================================================
-// R7FileManager - Modern C++23 Thread-Safe File Utility Library
+// R7Interactable Interface - Modern C++23 Thread-Safe File Utility Library
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 // ==========================================================
 
