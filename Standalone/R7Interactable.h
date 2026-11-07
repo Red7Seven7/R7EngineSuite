@@ -14,6 +14,11 @@
 * set interactable to your preffered use case
 * this is a comon method of creating interfaces
 * in C++.
+* VERY imporant note
+* while virtual functions are overridable without 
+* occluding the parent's function they do induce
+* a slight overhead due to looking up functions in Virtual Tables.
+* if you want maximum performance use regular functions, and occlude parent functions.
 */
 
 class R7Interactable 
