@@ -38,7 +38,12 @@ make your function exit early,like an emergency brake
 if conditions are met/not met
 in this case its used to simply stop early if its non-interactable.
 */
-
+/*
+void pointers are just ambiguous pointers.
+you know it exists but you dont know what it is.
+once you convert any pointer* to void* you strip its type
+but leave its location.
+*/
 
 
 
