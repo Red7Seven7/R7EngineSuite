@@ -1,6 +1,6 @@
 #pragma once
 // ==========================================================
-// R7Interactable Interface - Modern C++23 Thread-Safe File Utility Library
+// R7FileManager - Modern C++23 Thread-Safe File Utility Library
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 // ==========================================================
 
@@ -14,11 +14,6 @@
 * set interactable to your preffered use case
 * this is a comon method of creating interfaces
 * in C++.
-* VERY imporant note
-* while virtual functions are overridable without 
-* occluding the parent's function they do induce
-* a slight overhead due to looking up functions in Virtual Tables.
-* if you want maximum performance use regular functions, and occlude parent functions.
 */
 namespace R7
 {
