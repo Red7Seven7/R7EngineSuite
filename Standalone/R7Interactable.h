@@ -15,20 +15,22 @@
 * this is a comon method of creating interfaces
 * in C++.
 */
-
-class R7Interactable 
+namespace R7
 {
-public:
-	/*used for simple interactions
-	buttons,etc.
-	*/
-	virtual void Touch() { if (!interactable)return; };
-	/*used for Update Interactor operations
-	interactor=whoever touched this.
-	*/
-	virtual void Touch(void* interactor) { if (!interactable)return; };
-protected:/*mark protected to let this be modified when inherited*/
-	bool interactable = false;
+	class R7Interactable
+	{
+	public:
+		/*used for simple interactions
+		buttons,etc.
+		*/
+		virtual void Touch() { if (!interactable)return; };
+		/*used for Update Interactor operations
+		interactor=whoever touched this.
+		*/
+		virtual void Touch(void* interactor) { if (!interactable)return; };
+	protected:/*mark protected to let this be modified when inherited*/
+		bool interactable = false;
+	};
 };
 
 /*

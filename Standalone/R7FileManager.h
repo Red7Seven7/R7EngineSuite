@@ -4,7 +4,7 @@
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 // ==========================================================
 
-//C++23 enforced for <future> include
+// C++23 enforced for <future> and <expected>
 #if defined(_MSVC_LANG)
 #if _MSVC_LANG < 202302L
 #error "R7FileManager requires C++23 or a newer standard. Please enable C++23 in your compiler settings."
@@ -36,13 +36,13 @@ namespace R7 {
         OpenFailed,
         ReadFailed,
         WriteFailed,
-        InvalidParameter
+        InvalidParameter,
+        MagicMismatch // Added for magic signature validation failures
     };
 
- 
     /*
     AssetWriter
-    thread-safe stream writer
+    thread-safe stream writer with Magic Header support
     */
     class AssetWriter {
     public:
@@ -56,6 +56,21 @@ namespace R7 {
         // Allow moving
         AssetWriter(AssetWriter&&) noexcept = default;
         AssetWriter& operator=(AssetWriter&&) noexcept = default;
+
+        // Open and automatically write a 4-byte Magic Signature and Format Version header
+        std::expected<void, FileError> OpenWithHeader(const std::filesystem::path& filepath, uint32_t magicNumber, uint32_t version = 1) {
+            auto openRes = Open(filepath);
+            if (!openRes) return openRes;
+
+            auto writeMagic = Write(magicNumber);
+            if (!writeMagic) return std::unexpected(FileError::WriteFailed);
+
+            auto writeVersion = Write(version);
+            if (!writeVersion) return std::unexpected(FileError::WriteFailed);
+
+            return {};
+        }
+
         std::expected<void, FileError> Open(const std::filesystem::path& filepath) {
             std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -70,6 +85,7 @@ namespace R7 {
             }
             return {};
         }
+
         template <typename T>
         std::expected<void, FileError> Write(const T& data) {
             static_assert(std::is_trivial_v<T>, "AssetWriter::Write requires trivial/POD types");
@@ -79,6 +95,7 @@ namespace R7 {
             m_file.write(reinterpret_cast<const char*>(&data), sizeof(T));
             return m_file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         template <typename T>
         std::expected<void, FileError> WriteVector(const std::vector<T>& vec) {
             static_assert(std::is_trivial_v<T>, "AssetWriter::WriteVector requires trivial/POD types");
@@ -92,6 +109,7 @@ namespace R7 {
             }
             return m_file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         std::expected<void, FileError> WriteString(const std::string& str) {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_file.is_open()) return std::unexpected(FileError::WriteFailed);
@@ -101,6 +119,7 @@ namespace R7 {
             m_file.write(str.data(), length);
             return m_file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         void Close() {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_file.is_open()) {
@@ -118,8 +137,8 @@ namespace R7 {
         std::mutex m_mutex;
     };
 
-    /*R7 Filemanager
-    * async capable.
+    /* R7FileManager
+    * Async capable file utility library with header validation support.
     */
     class R7FileManager {
     public:
@@ -137,6 +156,7 @@ namespace R7 {
             file.write(reinterpret_cast<const char*>(data), sizeBytes);
             return file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         static std::expected<void, FileError> WriteTextFile(const std::filesystem::path& filepath, const std::string& text) {
             std::error_code ec;
             if (filepath.has_parent_path() && !std::filesystem::exists(filepath.parent_path(), ec)) {
@@ -149,6 +169,7 @@ namespace R7 {
             file << text;
             return file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         static std::expected<std::vector<char>, FileError> ReadFile(const std::filesystem::path& filepath) {
             std::error_code ec;
             if (!std::filesystem::exists(filepath, ec)) {
@@ -167,6 +188,26 @@ namespace R7 {
             }
             return outBuffer;
         }
+
+        // Validate 4-byte magic signature and extract file format version
+        static std::expected<uint32_t, FileError> ValidateHeader(const std::filesystem::path& filepath, uint32_t expectedMagic) {
+            auto fileData = ReadFile(filepath);
+            if (!fileData) return std::unexpected(fileData.error());
+
+            if (fileData->size() < sizeof(uint32_t) * 2) {
+                return std::unexpected(FileError::ReadFailed);
+            }
+
+            uint32_t fileMagic = *reinterpret_cast<const uint32_t*>(fileData->data());
+            uint32_t fileVersion = *reinterpret_cast<const uint32_t*>(fileData->data() + sizeof(uint32_t));
+
+            if (fileMagic != expectedMagic) {
+                return std::unexpected(FileError::MagicMismatch);
+            }
+
+            return fileVersion; // Returns the version number if valid
+        }
+
         static std::expected<void, FileError> AppendToFile(const std::filesystem::path& filepath, const void* data, size_t sizeBytes) {
             std::ofstream file(filepath, std::ios::binary | std::ios::app);
             if (!file.is_open()) return std::unexpected(FileError::OpenFailed);
@@ -174,13 +215,16 @@ namespace R7 {
             file.write(reinterpret_cast<const char*>(data), sizeBytes);
             return file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
         }
+
         static bool Remove(const std::filesystem::path& filepath) {
             std::error_code ec;
             return std::filesystem::remove(filepath, ec);
         }
+
         static bool Exists(const std::filesystem::path& filepath) {
             return std::filesystem::exists(filepath);
         }
+
         static std::vector<std::filesystem::path> GetFilesWithExtension(const std::filesystem::path& directory, const std::string& extension) {
             std::vector<std::filesystem::path> results;
             std::error_code ec;
@@ -194,8 +238,6 @@ namespace R7 {
             return results;
         }
 
-
-       
         struct ReadResult {
             std::filesystem::path filepath;
             std::expected<std::vector<char>, FileError> result;
@@ -271,6 +313,7 @@ namespace R7 {
             std::atomic<bool> m_running;
             std::thread m_worker;
         };
+
         static AsyncWriterQueue& GetAsyncWriter() {
             static AsyncWriterQueue instance;
             return instance;
