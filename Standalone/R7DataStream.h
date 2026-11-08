@@ -33,7 +33,6 @@ namespace R7 {
     //only use it for graphics or anything that gracefully accepts
     //reading half-updated values for determinism.
 
-
     struct Matrix4x4 {
         float m[4][4];
     };
@@ -41,6 +40,7 @@ namespace R7 {
         Matrix4x4 transform;
         unsigned int objectId;
     };
+    
     class RipStream {
     //Data tearing optimised stream with architecture-specific memory ordering
     
@@ -80,6 +80,7 @@ namespace R7 {
         alignas(64) std::atomic<size_t> m_writeIndex{ 0 };
         alignas(64) RenderPacket m_slots[3];
     };
+    
     template <typename T, size_t Capacity = 4>
     class TearingRingBuffer {
      //Data tearing optimised ring buffer with architecture-specific memory ordering.
@@ -100,12 +101,15 @@ namespace R7 {
             return m_slots[readIdx];
         }
     private:
+        //alignas prevents false sharing across threads.
         alignas(64) std::atomic<size_t> m_writeIndex;
         alignas(64) std::array<T, Capacity> m_slots;
     };
+    
     class AssetStream {
     //Thread-safe sequential binary stream for loading worlds, meshes, and serialized assets.
     //Uses internal mutex locking to allow safe concurrent reads from multiple worker threads.
+    //one of the only deterministic thing in here.
     public:
         bool Open(const std::string& filepath) {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -165,8 +169,137 @@ namespace R7 {
         size_t m_fileSize = 0;
         size_t m_offset = 0;
     };
+
+    template<typename T>
+        requires std::is_trivially_copyable_v<T>
+    class R7SeqLockArray
+    {
+        //another deterministic thing.
+        struct Slot
+        {
+            std::atomic<uint32_t> Seq{ 0 };   // even = stable, odd = write in progress
+            T Value{};                      // state and data share a cache line
+        };
+
+    public:
+        explicit R7SeqLockArray(int32_t Size, const T& Default = T())
+            : N(Size > 0 ? Size : 0)
+        {
+            if (N) {
+                Slots = std::make_unique<Slot[]>(N);
+                for (int32_t i = 0; i < N; ++i) Slots[i].Value = Default;
+            }
+        }
+
+        bool Get(int32_t i, T& Out) const
+        {
+            if (i < 0 || i >= N) return false;
+            const Slot& S = Slots[i];
+            while (true)
+            {
+                uint32_t s1 = S.Seq.load(std::memory_order_acquire);
+                if (s1 & 1u) { R7_PAUSE(); continue; }
+
+                std::memcpy(&Out, &S.Value, sizeof(T));
+                std::atomic_thread_fence(std::memory_order_acquire);
+
+                if (S.Seq.load(std::memory_order_relaxed) == s1) return true;
+                R7_PAUSE();
+            }
+        }
+
+        void Set(int32_t i, const T& V)
+        {
+            if (i < 0 || i >= N) return;
+            Slot& S = Slots[i];
+
+            uint32_t s = S.Seq.load(std::memory_order_relaxed);
+            while ((s & 1u) ||
+                !S.Seq.compare_exchange_weak(s, s + 1, std::memory_order_relaxed))
+            {
+                R7_PAUSE();
+                s = S.Seq.load(std::memory_order_relaxed);
+            }
+            std::atomic_thread_fence(std::memory_order_release); // odd seq visible before data writes
+            std::memcpy(&S.Value, &V, sizeof(T));
+            S.Seq.store(s + 2, std::memory_order_release);
+        }
+
+        int32_t Num() const { return N; }
+
+    private:
+        std::unique_ptr<Slot[]> Slots;
+        int32_t N = 0;
+    };
+
+    template<typename T>
+        requires std::is_trivially_copyable_v<T>
+        && std::is_default_constructible_v<T>
+        && (!std::is_pointer_v<T>)
+        && (!std::is_member_pointer_v<T>)
+    class R7TearingArray
+    {
+        // Lock-free array where reads and writes to the same index may overlap.
+        // A Get() racing a Set() can return a mix of old and new 8-byte words.
+        // Two racing Set()s can leave a mix of both values causing a tear.
+        // Only use this where a torn value is acceptable (rendering, debug overlays,
+        // telemetry, interpolated transforms,networking perhaps).
+
+        static constexpr size_t WordCount = (sizeof(T) + 7) / 8;
+        static_assert(std::atomic<uint64_t>::is_always_lock_free,
+            "Needs lock-free 64-bit atomics (use a 64-bit target)");
+
+        struct Slot
+        {
+            std::atomic<uint64_t> Words[WordCount];
+        };
+
+    public:
+        explicit R7TearingArray(int32_t Size, const T& Default = T())
+            : N(Size > 0 ? Size : 0)
+        {
+            if (N == 0) return;
+            Slots = std::make_unique<Slot[]>(N);
+            for (int32_t i = 0; i < N; ++i) Set(i, Default);
+        }
+
+        R7TearingArray(const R7TearingArray&) = delete;
+        R7TearingArray& operator=(const R7TearingArray&) = delete;
+
+        void Set(int32_t i, const T& Value)
+        {
+            if (i < 0 || i >= N) return;
+
+            uint64_t Tmp[WordCount] = {};            // zero tail padding
+            std::memcpy(Tmp, &Value, sizeof(T));     // local copy, no race here
+
+            Slot& S = Slots[i];
+            for (size_t k = 0; k < WordCount; ++k)
+                S.Words[k].store(Tmp[k], std::memory_order_relaxed);
+        }
+
+        T Get(int32_t i) const
+        {
+            T Out{};
+            if (i < 0 || i >= N) return Out;
+
+            uint64_t Tmp[WordCount];
+            const Slot& S = Slots[i];
+            for (size_t k = 0; k < WordCount; ++k)
+                Tmp[k] = S.Words[k].load(std::memory_order_relaxed);
+
+            std::memcpy(&Out, Tmp, sizeof(T));
+            return Out;
+        }
+
+        int32_t Num() const { return N; }
+
+    private:
+        std::unique_ptr<Slot[]> Slots;
+        int32_t N = 0;
+    };
 };
 
 #else
-#error "R7AssetManager requires glm to be included and present in your header search paths."
+#error "R7DataStream requires glm to be included and present in your header search paths."
 #endif
