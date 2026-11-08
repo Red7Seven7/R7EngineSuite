@@ -6,13 +6,13 @@
 
 // C++23 enforced for <future> and <expected>
 #if defined(_MSVC_LANG)
-#if _MSVC_LANG < 202302L
-#error "R7FileManager requires C++23 or a newer standard. Please enable C++23 in your compiler settings."
-#endif
+#  if _MSVC_LANG < 202004L   // /std:c++latest on MSVC
+#    error "R7FileManager requires C++23 or a newer standard. Use /std:c++latest (or /std:c++23preview)."
+#  endif
 #else
-#if __cplusplus < 202302L
-#error "R7FileManager requires C++23 or a newer standard. Please use -std=c++23 (or higher)."
-#endif
+#  if __cplusplus < 202302L
+#    error "R7FileManager requires C++23 or a newer standard. Please use -std=c++23 (or higher)."
+#  endif
 #endif
 
 #include <string>
@@ -61,13 +61,10 @@ namespace R7 {
         std::expected<void, FileError> OpenWithHeader(const std::filesystem::path& filepath, uint32_t magicNumber, uint32_t version = 1) {
             auto openRes = Open(filepath);
             if (!openRes) return openRes;
-
             auto writeMagic = Write(magicNumber);
             if (!writeMagic) return std::unexpected(FileError::WriteFailed);
-
             auto writeVersion = Write(version);
             if (!writeVersion) return std::unexpected(FileError::WriteFailed);
-
             return {};
         }
 

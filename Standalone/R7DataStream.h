@@ -1,15 +1,19 @@
 #pragma once
 
+
+
 #include <atomic>
 #include <array>
 #include <cstring>
 #include <vector>
 #include <string>
 #include <fstream>
+#include <memory>
+#include <cstdint>
 #include <mutex>
 #include <type_traits>
 #include <filesystem>
-
+#include <thread>
 // Detect x86 / x64 architectures,
 // X86 should not matter.
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -40,10 +44,10 @@ namespace R7 {
         Matrix4x4 transform;
         unsigned int objectId;
     };
-    
+
     class RipStream {
-    //Data tearing optimised stream with architecture-specific memory ordering
-    
+        //Data tearing optimised stream with architecture-specific memory ordering
+
     public:
         RipStream() {
             m_writeIndex.store(0, std::memory_order_relaxed);
@@ -80,10 +84,10 @@ namespace R7 {
         alignas(64) std::atomic<size_t> m_writeIndex{ 0 };
         alignas(64) RenderPacket m_slots[3];
     };
-    
+
     template <typename T, size_t Capacity = 4>
     class TearingRingBuffer {
-     //Data tearing optimised ring buffer with architecture-specific memory ordering.
+        //Data tearing optimised ring buffer with architecture-specific memory ordering.
     public:
         TearingRingBuffer() {
             m_writeIndex.store(0, std::memory_order_relaxed);
@@ -105,11 +109,11 @@ namespace R7 {
         alignas(64) std::atomic<size_t> m_writeIndex;
         alignas(64) std::array<T, Capacity> m_slots;
     };
-    
+
     class AssetStream {
-    //Thread-safe sequential binary stream for loading worlds, meshes, and serialized assets.
-    //Uses internal mutex locking to allow safe concurrent reads from multiple worker threads.
-    //one of the only deterministic thing in here.
+        //Thread-safe sequential binary stream for loading worlds, meshes, and serialized assets.
+        //Uses internal mutex locking to allow safe concurrent reads from multiple worker threads.
+        //one of the only deterministic thing in here.
     public:
         bool Open(const std::string& filepath) {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -198,13 +202,13 @@ namespace R7 {
             while (true)
             {
                 uint32_t s1 = S.Seq.load(std::memory_order_acquire);
-                if (s1 & 1u) { R7_PAUSE(); continue; }
+                if (s1 & 1u) { std::this_thread::yield(); continue; }
 
                 std::memcpy(&Out, &S.Value, sizeof(T));
                 std::atomic_thread_fence(std::memory_order_acquire);
 
                 if (S.Seq.load(std::memory_order_relaxed) == s1) return true;
-                R7_PAUSE();
+                std::this_thread::yield();
             }
         }
 
@@ -217,10 +221,10 @@ namespace R7 {
             while ((s & 1u) ||
                 !S.Seq.compare_exchange_weak(s, s + 1, std::memory_order_relaxed))
             {
-                R7_PAUSE();
+                std::this_thread::yield();
                 s = S.Seq.load(std::memory_order_relaxed);
             }
-            std::atomic_thread_fence(std::memory_order_release); // odd seq visible before data writes
+            std::atomic_thread_fence(std::memory_order_release);
             std::memcpy(&S.Value, &V, sizeof(T));
             S.Seq.store(s + 2, std::memory_order_release);
         }
@@ -234,10 +238,10 @@ namespace R7 {
 
     template<typename T>
         requires std::is_trivially_copyable_v<T>
-        && std::is_default_constructible_v<T>
+    && std::is_default_constructible_v<T>
         && (!std::is_pointer_v<T>)
         && (!std::is_member_pointer_v<T>)
-    class R7TearingArray
+        class R7TearingArray
     {
         // Lock-free array where reads and writes to the same index may overlap.
         // A Get() racing a Set() can return a mix of old and new 8-byte words.
@@ -303,3 +307,5 @@ namespace R7 {
 #else
 #error "R7DataStream requires glm to be included and present in your header search paths."
 #endif
+
+ 
