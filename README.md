@@ -7,6 +7,4 @@ most importantly,learn off it.
 
 
 includes:
-Header only C++ file manager for R7 Suite. 
-Header only C++ asset manager for R7 Suite.
-Header only C++ interactable interface for R7 Suite and as an example.
+Mostly header only libraries
