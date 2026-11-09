@@ -1,17 +1,17 @@
 #pragma once
 // ==========================================================
 // R7FileManager - Modern C++23 Thread-Safe File Utility Library
+// & Embedded File Manager UI Panel
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 // ==========================================================
 
-// C++23 enforced for <future> and <expected>
 #if defined(_MSVC_LANG)
-#  if _MSVC_LANG < 202004L   // /std:c++latest on MSVC
-#    error "R7FileManager requires C++23 or a newer standard. Use /std:c++latest (or /std:c++23preview)."
+#  if _MSVC_LANG < 202004L   
+#    error "R7FileManager requires C++23 or a newer standard."
 #  endif
 #else
 #  if __cplusplus < 202302L
-#    error "R7FileManager requires C++23 or a newer standard. Please use -std=c++23 (or higher)."
+#    error "R7FileManager requires C++23 or a newer standard."
 #  endif
 #endif
 
@@ -26,6 +26,11 @@
 #include <thread>
 #include <future>
 #include <atomic>
+#include <iostream>
+#include <glm/glm.hpp>
+#include <volk.h>
+#include <GLFW/glfw3.h>
+#include "R7UserInterface.h"
 
 namespace R7 {
 
@@ -37,27 +42,19 @@ namespace R7 {
         ReadFailed,
         WriteFailed,
         InvalidParameter,
-        MagicMismatch // Added for magic signature validation failures
+        MagicMismatch
     };
 
-    /*
-    AssetWriter
-    thread-safe stream writer with Magic Header support
-    */
     class AssetWriter {
     public:
         AssetWriter() = default;
         ~AssetWriter() { Close(); }
 
-        // Prevent stream corruption via copying
         AssetWriter(const AssetWriter&) = delete;
         AssetWriter& operator=(const AssetWriter&) = delete;
-
-        // Allow moving
         AssetWriter(AssetWriter&&) noexcept = default;
         AssetWriter& operator=(AssetWriter&&) noexcept = default;
 
-        // Open and automatically write a 4-byte Magic Signature and Format Version header
         std::expected<void, FileError> OpenWithHeader(const std::filesystem::path& filepath, uint32_t magicNumber, uint32_t version = 1) {
             auto openRes = Open(filepath);
             if (!openRes) return openRes;
@@ -70,16 +67,13 @@ namespace R7 {
 
         std::expected<void, FileError> Open(const std::filesystem::path& filepath) {
             std::lock_guard<std::mutex> lock(m_mutex);
-
             std::error_code ec;
             if (filepath.has_parent_path() && !std::filesystem::exists(filepath.parent_path(), ec)) {
                 std::filesystem::create_directories(filepath.parent_path(), ec);
             }
 
             m_file.open(filepath, std::ios::binary | std::ios::out | std::ios::trunc);
-            if (!m_file.is_open()) {
-                return std::unexpected(FileError::OpenFailed);
-            }
+            if (!m_file.is_open()) return std::unexpected(FileError::OpenFailed);
             return {};
         }
 
@@ -119,9 +113,7 @@ namespace R7 {
 
         void Close() {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_file.is_open()) {
-                m_file.close();
-            }
+            if (m_file.is_open()) m_file.close();
         }
 
     private:
@@ -134,9 +126,6 @@ namespace R7 {
         std::mutex m_mutex;
     };
 
-    /* R7FileManager
-    * Async capable file utility library with header validation support.
-    */
     class R7FileManager {
     public:
         R7FileManager() = delete;
@@ -169,9 +158,7 @@ namespace R7 {
 
         static std::expected<std::vector<char>, FileError> ReadFile(const std::filesystem::path& filepath) {
             std::error_code ec;
-            if (!std::filesystem::exists(filepath, ec)) {
-                return std::unexpected(FileError::NotFound);
-            }
+            if (!std::filesystem::exists(filepath, ec)) return std::unexpected(FileError::NotFound);
 
             std::ifstream file(filepath, std::ios::binary | std::ios::ate);
             if (!file.is_open()) return std::unexpected(FileError::OpenFailed);
@@ -180,37 +167,21 @@ namespace R7 {
             file.seekg(0, std::ios::beg);
 
             std::vector<char> outBuffer(size);
-            if (!file.read(outBuffer.data(), size)) {
-                return std::unexpected(FileError::ReadFailed);
-            }
+            if (!file.read(outBuffer.data(), size)) return std::unexpected(FileError::ReadFailed);
             return outBuffer;
         }
 
-        // Validate 4-byte magic signature and extract file format version
         static std::expected<uint32_t, FileError> ValidateHeader(const std::filesystem::path& filepath, uint32_t expectedMagic) {
             auto fileData = ReadFile(filepath);
             if (!fileData) return std::unexpected(fileData.error());
 
-            if (fileData->size() < sizeof(uint32_t) * 2) {
-                return std::unexpected(FileError::ReadFailed);
-            }
+            if (fileData->size() < sizeof(uint32_t) * 2) return std::unexpected(FileError::ReadFailed);
 
             uint32_t fileMagic = *reinterpret_cast<const uint32_t*>(fileData->data());
             uint32_t fileVersion = *reinterpret_cast<const uint32_t*>(fileData->data() + sizeof(uint32_t));
 
-            if (fileMagic != expectedMagic) {
-                return std::unexpected(FileError::MagicMismatch);
-            }
-
-            return fileVersion; // Returns the version number if valid
-        }
-
-        static std::expected<void, FileError> AppendToFile(const std::filesystem::path& filepath, const void* data, size_t sizeBytes) {
-            std::ofstream file(filepath, std::ios::binary | std::ios::app);
-            if (!file.is_open()) return std::unexpected(FileError::OpenFailed);
-
-            file.write(reinterpret_cast<const char*>(data), sizeBytes);
-            return file.good() ? std::expected<void, FileError>{} : std::unexpected(FileError::WriteFailed);
+            if (fileMagic != expectedMagic) return std::unexpected(FileError::MagicMismatch);
+            return fileVersion;
         }
 
         static bool Remove(const std::filesystem::path& filepath) {
@@ -234,87 +205,176 @@ namespace R7 {
             }
             return results;
         }
+    };
 
-        struct ReadResult {
-            std::filesystem::path filepath;
-            std::expected<std::vector<char>, FileError> result;
-        };
+    // ==========================================
+    // Embedded FileManagerPanel (Moved directly into R7FileManager.h)
+    // ==========================================
+    namespace UI_Panel_Atlas {
+        static constexpr glm::vec2 ArrowUpMin = { 0.1875f, 0.125f };
+        static constexpr glm::vec2 ArrowUpMax = { 0.2500f, 0.1875f };
+        static constexpr glm::vec2 FileIconMin = { 0.0000f, 0.0625f };
+        static constexpr glm::vec2 FileIconMax = { 0.0625f, 0.1250f };
+        static constexpr glm::vec2 PanelBgMin = { 0.7500f, 0.0000f };
+        static constexpr glm::vec2 PanelBgMax = { 0.8125f, 0.0625f };
+    }
 
-        static std::vector<std::future<ReadResult>> ReadFilesParallel(
-            const std::vector<std::filesystem::path>& filepaths)
-        {
-            std::vector<std::future<ReadResult>> futures;
-            futures.reserve(filepaths.size());
+    struct FileEntry {
+        std::filesystem::path path;
+        std::string name;
+        bool isDirectory;
+        uintmax_t fileSize;
+    };
 
-            for (const auto& path : filepaths) {
-                futures.push_back(std::async(std::launch::async, [path]() {
-                    ReadResult res;
-                    res.filepath = path;
-                    res.result = ReadFile(path);
-                    return res;
-                }));
-            }
-
-            return futures;
+    template<float SizeX = 700.0f, float SizeY = 500.0f>
+    class FileManagerPanel : public R7SizedPanel<SizeX, SizeY> {
+    public:
+        FileManagerPanel(VkDescriptorSet atlasDescriptor = VK_NULL_HANDLE, const std::filesystem::path& initialPath = std::filesystem::current_path())
+            : R7SizedPanel<SizeX, SizeY>(atlasDescriptor), m_currentPath(initialPath) {
+            RefreshDirectory();
         }
 
-        class AsyncWriterQueue {
-        public:
-            AsyncWriterQueue() : m_running(true) {
-                m_worker = std::thread(&AsyncWriterQueue::ProcessQueue, this);
+        void SetCurrentPath(const std::filesystem::path& path) {
+            if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
+                m_currentPath = path;
+                m_selectedIndex = -1;
+                m_scrollOffset = 0;
+                RefreshDirectory();
             }
-            ~AsyncWriterQueue() {
-                Stop();
-            }
-            void EnqueueWrite(std::filesystem::path filepath, std::vector<char> data) {
-                {
-                    std::lock_guard<std::mutex> lock(m_queueMutex);
-                    m_tasks.push({ std::move(filepath), std::move(data) });
-                }
-                m_cv.notify_one();
-            }
-            void Stop() {
-                {
-                    std::lock_guard<std::mutex> lock(m_queueMutex);
-                    m_running = false;
-                }
-                m_cv.notify_all();
-                if (m_worker.joinable()) {
-                    m_worker.join();
-                }
-            }
-        private:
-            struct WriteTask {
-                std::filesystem::path filepath;
-                std::vector<char> data;
-            };
-            void ProcessQueue() {
-                while (true) {
-                    WriteTask task;
-                    {
-                        std::unique_lock<std::mutex> lock(m_queueMutex);
-                        m_cv.wait(lock, [this] { return !m_tasks.empty() || !m_running; });
+        }
 
-                        if (!m_running && m_tasks.empty()) break;
+        const std::filesystem::path& GetSelectedFile() const { return m_selectedPath; }
 
-                        task = std::move(m_tasks.front());
-                        m_tasks.pop();
+        virtual void Render(R7UserInterface& ui) override {
+            if (this->m_texture != VK_NULL_HANDLE) {
+                ui.DrawImage(this->m_posX, this->m_posY, SizeX, SizeY, this->m_texture,
+                    { 0.85f, 0.88f, 0.92f, 0.98f }, UI_Panel_Atlas::PanelBgMin, UI_Panel_Atlas::PanelBgMax);
+            }
+            else {
+                ui.DrawRect(this->m_posX, this->m_posY, SizeX, SizeY, { 0.12f, 0.14f, 0.18f, 0.95f });
+            }
+
+            ui.DrawRect(this->m_posX, this->m_posY, SizeX, 32.0f, { 0.08f, 0.10f, 0.12f, 1.0f });
+            ui.DrawString(this->m_posX + 12.0f, this->m_posY + 8.0f, 1.0f, "R7 FILE MANAGER", VK_NULL_HANDLE, { 0.9f, 0.9f, 0.95f, 1.0f });
+
+            float toolbarY = this->m_posY + 36.0f;
+            ui.DrawRect(this->m_posX + 8.0f, toolbarY, SizeX - 16.0f, 32.0f, { 0.18f, 0.20f, 0.24f, 1.0f });
+
+            if (ui.DrawButton(this->m_posX + 12.0f, toolbarY + 4.0f, 24.0f, 24.0f, "", { 0.25f, 0.28f, 0.35f, 1.0f })) {
+                if (m_currentPath.has_parent_path()) {
+                    SetCurrentPath(m_currentPath.parent_path());
+                }
+            }
+            ui.DrawImage(this->m_posX + 16.0f, toolbarY + 8.0f, 16.0f, 16.0f, this->m_texture,
+                { 1.0f, 1.0f, 1.0f, 1.0f }, UI_Panel_Atlas::ArrowUpMin, UI_Panel_Atlas::ArrowUpMax);
+
+            std::string pathStr = m_currentPath.string();
+            if (pathStr.length() > 55) {
+                pathStr = "..." + pathStr.substr(pathStr.length() - 52);
+            }
+            ui.DrawRect(this->m_posX + 44.0f, toolbarY + 4.0f, SizeX - 60.0f, 24.0f, { 0.10f, 0.11f, 0.14f, 1.0f });
+            ui.DrawString(this->m_posX + 50.0f, toolbarY + 8.0f, 0.85f, pathStr, VK_NULL_HANDLE, { 0.7f, 0.85f, 1.0f, 1.0f });
+
+            float listX = this->m_posX + 12.0f;
+            float listY = toolbarY + 38.0f;
+            float listW = SizeX - 24.0f;
+            float listH = SizeY - 120.0f;
+
+            ui.DrawRect(listX, listY, listW, listH, { 0.08f, 0.09f, 0.11f, 1.0f });
+
+            const float rowHeight = 26.0f;
+            int maxVisibleRows = static_cast<int>(listH / rowHeight);
+
+            for (int i = 0; i < maxVisibleRows; ++i) {
+                int entryIndex = m_scrollOffset + i;
+                if (entryIndex >= static_cast<int>(m_entries.size())) break;
+
+                const auto& entry = m_entries[entryIndex];
+                float rowY = listY + (i * rowHeight);
+                bool isSelected = (entryIndex == m_selectedIndex);
+
+                glm::vec4 rowBg = isSelected ? glm::vec4(0.2f, 0.35f, 0.55f, 1.0f)
+                    : ((i % 2 == 0) ? glm::vec4(0.12f, 0.13f, 0.16f, 1.0f) : glm::vec4(0.10f, 0.11f, 0.14f, 1.0f));
+
+                if (ui.DrawButton(listX + 2.0f, rowY + 2.0f, listW - 4.0f, rowHeight - 2.0f, "", rowBg)) {
+                    m_selectedIndex = entryIndex;
+                    m_selectedPath = entry.path;
+                    if (entry.isDirectory) {
+                        SetCurrentPath(entry.path);
+                        return;
                     }
+                }
 
-                    R7FileManager::WriteFile(task.filepath, task.data.data(), task.data.size());
+                glm::vec4 iconTint = entry.isDirectory ? glm::vec4(1.0f, 0.8f, 0.3f, 1.0f) : glm::vec4(0.6f, 0.75f, 0.9f, 1.0f);
+                ui.DrawImage(listX + 8.0f, rowY + 5.0f, 16.0f, 16.0f, this->m_texture, iconTint, UI_Panel_Atlas::FileIconMin, UI_Panel_Atlas::FileIconMax);
+
+                std::string label = entry.name + (entry.isDirectory ? "/" : "");
+                if (label.length() > 40) label = label.substr(0, 37) + "...";
+                ui.DrawString(listX + 32.0f, rowY + 6.0f, 0.9f, label, VK_NULL_HANDLE, { 0.9f, 0.9f, 0.9f, 1.0f });
+
+                if (!entry.isDirectory) {
+                    ui.DrawString(listX + listW - 100.0f, rowY + 6.0f, 0.8f, FormatSize(entry.fileSize), VK_NULL_HANDLE, { 0.5f, 0.6f, 0.7f, 1.0f });
                 }
             }
-            std::queue<WriteTask> m_tasks;
-            std::mutex m_queueMutex;
-            std::condition_variable m_cv;
-            std::atomic<bool> m_running;
-            std::thread m_worker;
-        };
 
-        static AsyncWriterQueue& GetAsyncWriter() {
-            static AsyncWriterQueue instance;
-            return instance;
+            float footerY = this->m_posY + SizeY - 36.0f;
+            ui.DrawRect(this->m_posX + 12.0f, footerY, SizeX - 24.0f, 28.0f, { 0.15f, 0.17f, 0.20f, 1.0f });
+
+            std::string statusText = (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_entries.size()))
+                ? "Selected: " + m_entries[m_selectedIndex].name
+                : std::to_string(m_entries.size()) + " items";
+
+            ui.DrawString(this->m_posX + 20.0f, footerY + 7.0f, 0.85f, statusText, VK_NULL_HANDLE, { 0.7f, 0.7f, 0.75f, 1.0f });
+
+            if (ui.DrawButton(this->m_posX + SizeX - 116.0f, footerY + 3.0f, 100.0f, 22.0f, "", { 0.2f, 0.35f, 0.3f, 1.0f })) {
+                InspectSelectedAsset();
+            }
+            ui.DrawString(this->m_posX + SizeX - 102.0f, footerY + 7.0f, 0.80f, "Load Asset", VK_NULL_HANDLE, { 0.9f, 0.95f, 0.9f, 1.0f });
         }
+
+    private:
+        void RefreshDirectory() {
+            m_entries.clear();
+            std::error_code ec;
+            if (!std::filesystem::exists(m_currentPath, ec)) return;
+
+            for (const auto& entry : std::filesystem::directory_iterator(m_currentPath, ec)) {
+                FileEntry e;
+                e.path = entry.path();
+                e.name = entry.path().filename().string();
+                e.isDirectory = entry.is_directory(ec);
+                e.fileSize = e.isDirectory ? 0 : entry.file_size(ec);
+
+                if (e.isDirectory) m_entries.insert(m_entries.begin(), e);
+                else m_entries.push_back(e);
+            }
+        }
+
+        void InspectSelectedAsset() {
+            if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_entries.size())) return;
+            const auto& entry = m_entries[m_selectedIndex];
+            if (entry.isDirectory) return;
+
+            auto versionRes = R7::R7FileManager::ValidateHeader(entry.path, 0x52374153);
+            if (versionRes) {
+                std::cout << "[FileManagerPanel] Valid R7 Asset header found. Version: " << versionRes.value() << "\n";
+            }
+            else {
+                std::cout << "[FileManagerPanel] Standard file selected or magic mismatch.\n";
+            }
+        }
+
+        std::string FormatSize(uintmax_t bytes) const {
+            if (bytes < 1024) return std::to_string(bytes) + " B";
+            if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
+            return std::to_string(bytes / (1024 * 1024)) + " MB";
+        }
+
+        std::filesystem::path m_currentPath;
+        std::filesystem::path m_selectedPath;
+        std::vector<FileEntry> m_entries;
+        int m_selectedIndex = -1;
+        int m_scrollOffset = 0;
     };
 
 } // namespace R7
