@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <expected>
 #include <filesystem>
+#include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -21,15 +22,32 @@
 #include "R7WorldFramework.h"
 #include "R7Backend.h"
 #include "R7Font.h"
+#include "R7UserInterface.h"
 
-// Must come after Core::Font: the editor uses Font::GetCachedFont().
-#ifdef R7_EDITOR
-#include "R7Editor.h"
-#endif
-
+// Forward declare R7Editor functions used in Core::Initialize to stop circular include
+namespace R7::R7Editor {
+    void Initialize(GLFWwindow* window, VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamily, VkQueue queue, VkCommandPool commandPool);
+    void Shutdown();
+}
 namespace R7 {
     namespace Core
     {
+        namespace Detail {
+            inline std::vector<R7PanelBase*> registeredPanels;
+        }
+        inline void RegisterPanel(R7PanelBase* panel) {
+            if (panel) Detail::registeredPanels.push_back(panel);
+        }
+        inline void UnregisterPanel(R7PanelBase* panel) {
+            auto& panels = Detail::registeredPanels;
+            panels.erase(std::remove(panels.begin(), panels.end(), panel), panels.end());
+        }
+            for (R7PanelBase* panel : Detail::registeredPanels) {
+                if (panel) {
+                    panel->Render(ui);
+                }
+            }
+        }
         inline void Initialize(GLFWwindow* window,
             VkInstance instance,
             VkDevice device,
@@ -37,7 +55,6 @@ namespace R7 {
             uint32_t queueFamily,
             VkQueue queue,
             VkCommandPool commandPool) {
-            // Prime the font cache (also avoids reading the file twice).
             if (Font::GetCachedFont().isLoaded) {
                 std::cout << "[Core] Default font ready: " << Font::s_defaultFontPath << "\n";
             }
@@ -48,28 +65,21 @@ namespace R7 {
             R7::R7Backend::Init();
 
 #ifdef R7_EDITOR
-            // Without this call the editor's initialized flag stays false and
-            // BeginFrame / RenderUI / EndFrame all return early.
             R7::R7Editor::Initialize(window, instance, device, physicalDevice,
                 queueFamily, queue, commandPool);
 #endif
         }
-
         inline void Update() {
-            R7::R7Backend::Update(); // update backend chain
+            R7::R7Backend::Update();
         }
-
         inline void DestroyBackend() {
             R7::R7Backend::Shutdown();
         }
-
         inline void DestroyEditor() {
 #ifdef R7_EDITOR
-            R7::R7Editor::Shutdown(); // no-op if it was never initialized
+            R7::R7Editor::Shutdown();
 #endif
         }
-
-        // Editor first: it holds raw pointers into the backend's worlds.
         inline void Cleanup() {
             DestroyEditor();
             DestroyBackend();
