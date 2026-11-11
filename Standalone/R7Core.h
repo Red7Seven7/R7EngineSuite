@@ -42,6 +42,7 @@ namespace R7 {
             auto& panels = Detail::registeredPanels;
             panels.erase(std::remove(panels.begin(), panels.end(), panel), panels.end());
         }
+        inline void RenderPanels(R7UserInterface& ui) {
             for (R7PanelBase* panel : Detail::registeredPanels) {
                 if (panel) {
                     panel->Render(ui);
