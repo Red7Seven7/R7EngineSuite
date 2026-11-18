@@ -24,30 +24,43 @@
 #pragma region includes
 #include <type_traits>
 #include <concepts>
+#include <numbers>
+#include <limits>
+#include <cmath>
+#include <cstddef>
 #pragma endregion
 #pragma region concepts
 template<typename t>concept scalar = std::is_arithmetic_v<t>;
 /* true for vec2<T>, vec3<T>, vec4<T> */
 template<typename v> concept vector_type = requires { vecTraits<v>::dim; };
+template<typename mt> concept matrix_type = requires { matTraits<mt>::dim; };
 
 #pragma endregion
 #pragma region macros
+/*scalar */
 #define SCALT template<scalar t>
 #define SCALTND SCALT [[nodiscard]]
 #define SCALTNDCX SCALTND constexpr
 #define REGT template<typename t>
 #define REGTND REGT [[nodiscard]]
+/* floating point */
 #define FLTT template <std::floating_point t>
 #define FLTTND FLTT [[nodiscard]]
 #define FLTTNDCX FLTTND constexpr
 #define FLTTICX FLTT inline constexpr
 #define FLTTCX FLTT constexpr
 #define NDFRCX [[nodiscard]] friend constexpr
-#define NDCX [[nodiscoard]] constexpr
+#define NDCX [[nodiscard]] constexpr
+/* vector */
 #define TV template<vector_type v>
 #define TVCX TV constexpr
 #define TVND [[nodiscard]]
 #define TVNDCX TV constexpr [[nodiscard]]
+/* matrix */
+#define TM template<matrix_type mt>
+#define TMCX TM constexpr
+#define TMNDCX TM [[nodiscard]] constexpr
+#define TMFLT template<matrix_type mt> requires std::floating_point<matScalarOf<mt>>
 #pragma endregion
 #pragma region constants
 /* Usage: pi<float>, tau<double>, epsilon<float>, ... */
@@ -539,16 +552,9 @@ template<scalar t> struct matTraits<matrix4x4<t>> {
 };
 
 /* true for matrix2x2<T>, matrix3x3<T>, matrix4x4<T> */
-template<typename mt> concept matrix_type = requires { matTraits<mt>::dim; };
-
-template<matrix_type mt> using matScalarOf = typename matTraits<mt>::scalar_type;
-template<matrix_type mt> using matVecOf = typename matTraits<mt>::vec_type;
-template<matrix_type mt> inline constexpr std::size_t matDimOf = matTraits<mt>::dim;
-
-#define TM template<matrix_type mt>
-#define TMCX TM constexpr
-#define TMNDCX TM [[nodiscard]] constexpr
-#define TMFLT template<matrix_type mt> requires std::floating_point<matScalarOf<mt>>
+TM using matScalarOf = typename matTraits<mt>::scalar_type;
+TM using matVecOf = typename matTraits<mt>::vec_type;
+TM inline constexpr std::size_t matDimOf = matTraits<mt>::dim;
 
 typedef matrix2x2<double> mat2d;
 typedef matrix3x3<double> mat3d;
