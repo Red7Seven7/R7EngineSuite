@@ -1,39 +1,45 @@
-
-#pragma once
+module;
 
 // ==========================================================
 // R7DataTypes - frequent-use data types with math helpers
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
-//
-// boneless templated types
+// 
+// ingredients:
+// contains templates,
+// chain inherited vectors(2,3,4) for data slicing,
+// quaternions,
+// transforms,
+// matrices(2x2,3x3,4x4) with helpers
+// and math helpers.
+// May contain tears.
 // ==========================================================
 
 
-/*
-* R7 DataTypes library
-* includes math functions
-* 
-* includes chain inherited vectors for data slicing.
-* quat,transforms
-* all templated, enjoy.
-* 
-* if you find any bugs shoot me a message on github at 
-* 
-* RedSeven:Red7Seven7
-*/
-#pragma region includes
+
+
+
 #include <type_traits>
 #include <concepts>
 #include <numbers>
 #include <limits>
 #include <cmath>
 #include <cstddef>
-#pragma endregion
+
+/* SSE2 is baseline on x86-64, so this is on for every 64-bit x86 build. Other targets (ARM, ...) use the scalar code. */
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+#include <emmintrin.h>
+#define R7_SIMD_SSE 1
+#endif
+
+export module R7DataTypes;
+
+export {
+
 #pragma region concepts
 template<typename t>concept scalar = std::is_arithmetic_v<t>;
+template<typename v> struct vecTraits;
 /* true for vec2<T>, vec3<T>, vec4<T> */
 template<typename v> concept vector_type = requires { vecTraits<v>::dim; };
-template<typename mt> concept matrix_type = requires { matTraits<mt>::dim; };
 
 #pragma endregion
 #pragma region macros
@@ -55,7 +61,7 @@ template<typename mt> concept matrix_type = requires { matTraits<mt>::dim; };
 #define TV template<vector_type v>
 #define TVCX TV constexpr
 #define TVND [[nodiscard]]
-#define TVNDCX TV constexpr [[nodiscard]]
+#define TVNDCX TV [[nodiscard]] constexpr
 /* matrix */
 #define TM template<matrix_type mt>
 #define TMCX TM constexpr
@@ -98,9 +104,19 @@ FLTTICX float  taof = tau<float>;
 FLTTICX double taod = tau<double>;
 #pragma endregion
 #pragma region Matrices
-SCALT struct matrix2x2 { t m[2][2]; }; typedef matrix2x2<float> mat2f;
-SCALT struct matrix3x3 { t m[3][3]; }; typedef matrix3x3<float> mat3f;
-SCALT struct matrix4x4 { t m[4][4]; }; typedef matrix4x4<float> mat4f;
+/* Column-major storage, m[col][row] -- the same memory layout GLSL/SPIR-V expects, so these upload to the GPU as-is.
+   m[c] is column c. Maths convention is unchanged: column vectors, M * v, (A * B) applies B first. */
+SCALT struct matrix2x2 { t m[2][2];
+    /* build from rows written the way you read the matrix on paper */
+    [[nodiscard]] static constexpr matrix2x2 fromRows(const t(&r)[2][2]) noexcept {
+        matrix2x2 o{}; for (int i = 0; i < 2; ++i) for (int j = 0; j < 2; ++j) o.m[j][i] = r[i][j]; return o; } }; typedef matrix2x2<float> mat2f;
+SCALT struct matrix3x3 { t m[3][3];
+    [[nodiscard]] static constexpr matrix3x3 fromRows(const t(&r)[3][3]) noexcept {
+        matrix3x3 o{}; for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) o.m[j][i] = r[i][j]; return o; } }; typedef matrix3x3<float> mat3f;
+SCALT struct matrix4x4 { t m[4][4];
+    [[nodiscard]] static constexpr matrix4x4 fromRows(const t(&r)[4][4]) noexcept {
+        matrix4x4 o{}; for (int i = 0; i < 4; ++i) for (int j = 0; j < 4; ++j) o.m[j][i] = r[i][j]; return o; } }; typedef matrix4x4<float> mat4f;
+static_assert(sizeof(matrix4x4<float>) == 16 * sizeof(float), "mat4f must be 16 tightly packed floats");
 #pragma endregion
 #pragma region vector types
 #pragma region vector2
@@ -122,7 +138,7 @@ SCALT struct vec2 {
     NDFRCX vec2 operator*(t s, vec2 v) noexcept { return v *= s; }
     NDFRCX vec2 operator/(vec2 v, t s) noexcept { return v /= s; }
     /* comparrison */
-    NDFRCX bool operator==(const vec2&, const vec2&) = default;
+    NDCX bool operator==(const vec2&) const noexcept = default;
     /* indexed access */
     NDCX t& operator[](std::size_t i) noexcept { return i == 0 ? x : y; }
     NDCX const t& operator[](std::size_t i) const noexcept { return i == 0 ? x : y; }
@@ -164,11 +180,11 @@ SCALT struct vec3 {
     NDFRCX vec3 operator/(vec3 v, t s) noexcept { return v /= s; }
 
     /*comparison*/
-    NDFRCX bool operator==(const vec3&, const vec3&) = default;
+    NDCX bool operator==(const vec3&) const noexcept = default;
 
     /*indexed access, 0=x,1=y,2=z (anything else returns z)*/
-    NDFRCX t& operator[](std::size_t i) noexcept { return i == 0 ? x : (i == 1 ? y : z); }
-    NDFRCX const t& operator[](std::size_t i) const noexcept { return i == 0 ? x : (i == 1 ? y : z); }
+    NDCX t& operator[](std::size_t i) noexcept { return i == 0 ? x : (i == 1 ? y : z); }
+    NDCX const t& operator[](std::size_t i) const noexcept { return i == 0 ? x : (i == 1 ? y : z); }
 };
 SCALTND constexpr t dot(const vec3<t>& a, const vec3<t>& b) noexcept {
     return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -216,7 +232,7 @@ SCALT struct vec4 {
     NDFRCX vec4 operator/(vec4 v, t s) noexcept { return v /= s; }
 
     /*comparison*/
-    NDFRCX bool operator==(const vec4&, const vec4&) = default;
+    NDCX bool operator==(const vec4&) const noexcept = default;
 
     /*indexed access, 0=x,1=y,2=z,3=w (anything else returns w)*/
     NDCX t& operator[](std::size_t i) noexcept {
@@ -291,7 +307,7 @@ FLTT struct quat {
     }
 
     /*comparison*/
-    NDFRCX bool operator==(const quat&, const quat&) = default;
+    NDCX bool operator==(const quat&) const noexcept = default;
 
     /*indexed access, 0=x,1=y,2=z,3=w (anything else returns w)*/
     NDCX t& operator[](std::size_t i) noexcept {
@@ -372,7 +388,7 @@ FLTT struct transform {
         };
     }
 
-    NDFRCX bool operator==(const transform&, const transform&) = default;
+    NDCX bool operator==(const transform&) const noexcept = default;
 };
 
 /* Exact only for uniform scale. A non-uniformly scaled, rotated transform has an inverse
@@ -384,7 +400,7 @@ FLTTND constexpr transform<t> inverse(const transform<t>& tr) noexcept {
     return { -rotate(invRot, scaledPos), invRot, invScale };
 }
 
-/* Column-vector convention, m[row][col]: M = T * R * S */
+/* Column-vector convention, m[col][row]: M = T * R * S */
 FLTTND constexpr matrix4x4<t> toMat4(const transform<t>& tr) noexcept {
     const t x = tr.rotation.x, y = tr.rotation.y, z = tr.rotation.z, w = tr.rotation.w;
     const t r[3][3] = {
@@ -397,8 +413,8 @@ FLTTND constexpr matrix4x4<t> toMat4(const transform<t>& tr) noexcept {
 
     matrix4x4<t> out{};
     for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) out.m[i][j] = r[i][j] * s[j]; // scale each column of R
-        out.m[i][3] = p[i];
+        for (int j = 0; j < 3; ++j) out.m[j][i] = r[i][j] * s[j]; // scale each column of R
+        out.m[3][i] = p[i];
     }
     out.m[3][3] = t(1);
     return out;
@@ -432,7 +448,7 @@ NDCX R floorToInt(t x) noexcept {
     const R i = static_cast<R>(x);                  // truncates toward zero
     return i - static_cast<R>(x < static_cast<t>(i)); // subtract 1 for negative non-integers
 }
-FLTTNDCX t fastFloor(t x) noexcept {return static_cast<t>(floorToInt<t, int>(x));}
+FLTTNDCX t fastFloor(t x) noexcept { return static_cast<t>(floorToInt<t, int>(x)); }
 /* component-wise */
 FLTTNDCX vec2<t> fastFloor(const vec2<t>& v) noexcept { return { fastFloor(v.x), fastFloor(v.y) }; }
 FLTTNDCX vec3<t> fastFloor(const vec3<t>& v) noexcept { return { fastFloor(v.x), fastFloor(v.y), fastFloor(v.z) }; }
@@ -489,7 +505,7 @@ SCALTNDCX t trunc(t x) noexcept {
 
 /* rounds half away from zero, like std::round.
    Computed from the fractional part, so 0.49999999999999994 rounds correctly to 0. */
-SCALTNDCX t round(t x) noexcept 
+SCALTNDCX t round(t x) noexcept
 {
     if constexpr (std::floating_point<t>) {
         const t i = trunc(x);
@@ -539,8 +555,8 @@ NDCX t nextPowerOfTwo(t x) noexcept {
 #pragma endregion
 #pragma region matrixOps
 #pragma region matrix traits
-template<typename mt> struct matTraits {};
-
+template<typename mt> struct matTraits {};//matrix trait
+template<typename mt> concept matrix_type = requires { matTraits<mt>::dim; };
 template<scalar t> struct matTraits<matrix2x2<t>> {
     using scalar_type = t; using vec_type = vec2<t>; static constexpr std::size_t dim = 2;
 };
@@ -550,8 +566,6 @@ template<scalar t> struct matTraits<matrix3x3<t>> {
 template<scalar t> struct matTraits<matrix4x4<t>> {
     using scalar_type = t; using vec_type = vec4<t>; static constexpr std::size_t dim = 4;
 };
-
-/* true for matrix2x2<T>, matrix3x3<T>, matrix4x4<T> */
 TM using matScalarOf = typename matTraits<mt>::scalar_type;
 TM using matVecOf = typename matTraits<mt>::vec_type;
 TM inline constexpr std::size_t matDimOf = matTraits<mt>::dim;
@@ -570,31 +584,26 @@ TMNDCX mt matIdentity() noexcept {
 
 /* build from basis vectors (each vector becomes a column) */
 SCALTNDCX matrix2x2<t> fromColumns(const vec2<t>& c0, const vec2<t>& c1) noexcept {
-    return {{ { c0.x, c1.x },
-              { c0.y, c1.y } }};
+    return { { { c0.x, c0.y }, { c1.x, c1.y } } };
 }
 SCALTNDCX matrix3x3<t> fromColumns(const vec3<t>& c0, const vec3<t>& c1, const vec3<t>& c2) noexcept {
-    return {{ { c0.x, c1.x, c2.x },
-              { c0.y, c1.y, c2.y },
-              { c0.z, c1.z, c2.z } }};
+    return { { { c0.x, c0.y, c0.z }, { c1.x, c1.y, c1.z }, { c2.x, c2.y, c2.z } } };
 }
 SCALTNDCX matrix4x4<t> fromColumns(const vec4<t>& c0, const vec4<t>& c1, const vec4<t>& c2, const vec4<t>& c3) noexcept {
-    return {{ { c0.x, c1.x, c2.x, c3.x },
-              { c0.y, c1.y, c2.y, c3.y },
-              { c0.z, c1.z, c2.z, c3.z },
-              { c0.w, c1.w, c2.w, c3.w } }};
+    return { { { c0.x, c0.y, c0.z, c0.w }, { c1.x, c1.y, c1.z, c1.w },
+              { c2.x, c2.y, c2.z, c2.w }, { c3.x, c3.y, c3.z, c3.w } } };
 }
 
 /* row / column i as a vector (i must be < dimension) */
 TMNDCX matVecOf<mt> row(const mt& a, std::size_t i) noexcept {
-    if constexpr (matDimOf<mt> == 2) return { a.m[i][0], a.m[i][1] };
-    else if constexpr (matDimOf<mt> == 3) return { a.m[i][0], a.m[i][1], a.m[i][2] };
-    else return { a.m[i][0], a.m[i][1], a.m[i][2], a.m[i][3] };
-}
-TMNDCX matVecOf<mt> column(const mt& a, std::size_t i) noexcept {
     if constexpr (matDimOf<mt> == 2) return { a.m[0][i], a.m[1][i] };
     else if constexpr (matDimOf<mt> == 3) return { a.m[0][i], a.m[1][i], a.m[2][i] };
     else return { a.m[0][i], a.m[1][i], a.m[2][i], a.m[3][i] };
+}
+TMNDCX matVecOf<mt> column(const mt& a, std::size_t i) noexcept {
+    if constexpr (matDimOf<mt> == 2) return { a.m[i][0], a.m[i][1] };
+    else if constexpr (matDimOf<mt> == 3) return { a.m[i][0], a.m[i][1], a.m[i][2] };
+    else return { a.m[i][0], a.m[i][1], a.m[i][2], a.m[i][3] };
 }
 #pragma endregion
 #pragma region matrix arithmetic
@@ -602,29 +611,29 @@ TMNDCX mt operator+(const mt& a) noexcept { return a; }
 TMNDCX mt operator-(const mt& a) noexcept {
     mt r{};
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) r.m[i][j] = -a.m[i][j];
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) r.m[j][i] = -a.m[j][i];
     return r;
 }
 
 /* compound */
 TMCX mt& operator+=(mt& a, const mt& b) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[i][j] += b.m[i][j];
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[j][i] += b.m[j][i];
     return a;
 }
 TMCX mt& operator-=(mt& a, const mt& b) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[i][j] -= b.m[i][j];
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[j][i] -= b.m[j][i];
     return a;
 }
 TMCX mt& operator*=(mt& a, matScalarOf<mt> s) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[i][j] *= s;
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[j][i] *= s;
     return a;
 }
 TMCX mt& operator/=(mt& a, matScalarOf<mt> s) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[i][j] /= s;
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) a.m[j][i] /= s;
     return a;
 }
 
@@ -638,14 +647,14 @@ TMNDCX mt operator/(mt a, matScalarOf<mt> s) noexcept { return a /= s; }
 TMNDCX bool operator==(const mt& a, const mt& b) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
         for (std::size_t j = 0; j < matDimOf<mt>; ++j)
-            if (!(a.m[i][j] == b.m[i][j])) return false;
+            if (!(a.m[j][i] == b.m[j][i])) return false;
     return true;
 }
 
 TMFLT [[nodiscard]] constexpr bool approxEqual(const mt& a, const mt& b, matScalarOf<mt> eps = matScalarOf<mt>(1e-5)) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
         for (std::size_t j = 0; j < matDimOf<mt>; ++j)
-            if (abs(a.m[i][j] - b.m[i][j]) > eps) return false;
+            if (abs(a.m[j][i] - b.m[j][i]) > eps) return false;
     return true;
 }
 #pragma endregion
@@ -656,41 +665,88 @@ TMNDCX mt operator*(const mt& a, const mt& b) noexcept {
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
         for (std::size_t j = 0; j < matDimOf<mt>; ++j) {
             matScalarOf<mt> sum{};
-            for (std::size_t k = 0; k < matDimOf<mt>; ++k) sum += a.m[i][k] * b.m[k][j];
-            r.m[i][j] = sum;
+            for (std::size_t k = 0; k < matDimOf<mt>; ++k) sum += a.m[k][i] * b.m[j][k];
+            r.m[j][i] = sum;
         }
     return r;
 }
+#ifdef R7_SIMD_SSE
+/* SSE 4x4 float multiply (picked over the generic template for mat4f).
+   Storage is column-major, so each column is 4 contiguous floats = one __m128, and
+   column j of (A * B) = A.col0 * B[j][0] + A.col1 * B[j][1] + A.col2 * B[j][2] + A.col3 * B[j][3].
+   Unaligned loads/stores, so no alignment requirement. Sums in the same order as the scalar version. */
+[[nodiscard]] constexpr matrix4x4<float> operator*(const matrix4x4<float>& a, const matrix4x4<float>& b) noexcept {
+    matrix4x4<float> r{};
+    if (std::is_constant_evaluated()) {          // intrinsics can't run at compile time
+        for (int j = 0; j < 4; ++j)
+            for (int i = 0; i < 4; ++i) {
+                float sum = 0.0f;
+                for (int k = 0; k < 4; ++k) sum += a.m[k][i] * b.m[j][k];
+                r.m[j][i] = sum;
+            }
+        return r;
+    }
+    const __m128 a0 = _mm_loadu_ps(a.m[0]), a1 = _mm_loadu_ps(a.m[1]);
+    const __m128 a2 = _mm_loadu_ps(a.m[2]), a3 = _mm_loadu_ps(a.m[3]);
+    for (int j = 0; j < 4; ++j) {
+        __m128 c = _mm_mul_ps(a0, _mm_set1_ps(b.m[j][0]));
+        c = _mm_add_ps(c, _mm_mul_ps(a1, _mm_set1_ps(b.m[j][1])));
+        c = _mm_add_ps(c, _mm_mul_ps(a2, _mm_set1_ps(b.m[j][2])));
+        c = _mm_add_ps(c, _mm_mul_ps(a3, _mm_set1_ps(b.m[j][3])));
+        _mm_storeu_ps(r.m[j], c);
+    }
+    return r;
+}
+#endif
 TMCX mt& operator*=(mt& a, const mt& b) noexcept { a = a * b; return a; }
 
 /* matrix * column vector */
 SCALTNDCX vec2<t> operator*(const matrix2x2<t>& a, const vec2<t>& v) noexcept {
-    return { a.m[0][0] * v.x + a.m[0][1] * v.y,
-             a.m[1][0] * v.x + a.m[1][1] * v.y };
+    return { a.m[0][0] * v.x + a.m[1][0] * v.y,
+             a.m[0][1] * v.x + a.m[1][1] * v.y };
 }
 SCALTNDCX vec3<t> operator*(const matrix3x3<t>& a, const vec3<t>& v) noexcept {
-    return { a.m[0][0] * v.x + a.m[0][1] * v.y + a.m[0][2] * v.z,
-             a.m[1][0] * v.x + a.m[1][1] * v.y + a.m[1][2] * v.z,
-             a.m[2][0] * v.x + a.m[2][1] * v.y + a.m[2][2] * v.z };
+    return { a.m[0][0] * v.x + a.m[1][0] * v.y + a.m[2][0] * v.z,
+             a.m[0][1] * v.x + a.m[1][1] * v.y + a.m[2][1] * v.z,
+             a.m[0][2] * v.x + a.m[1][2] * v.y + a.m[2][2] * v.z };
 }
 SCALTNDCX vec4<t> operator*(const matrix4x4<t>& a, const vec4<t>& v) noexcept {
-    return { a.m[0][0] * v.x + a.m[0][1] * v.y + a.m[0][2] * v.z + a.m[0][3] * v.w,
-             a.m[1][0] * v.x + a.m[1][1] * v.y + a.m[1][2] * v.z + a.m[1][3] * v.w,
-             a.m[2][0] * v.x + a.m[2][1] * v.y + a.m[2][2] * v.z + a.m[2][3] * v.w,
-             a.m[3][0] * v.x + a.m[3][1] * v.y + a.m[3][2] * v.z + a.m[3][3] * v.w };
+    return { a.m[0][0] * v.x + a.m[1][0] * v.y + a.m[2][0] * v.z + a.m[3][0] * v.w,
+             a.m[0][1] * v.x + a.m[1][1] * v.y + a.m[2][1] * v.z + a.m[3][1] * v.w,
+             a.m[0][2] * v.x + a.m[1][2] * v.y + a.m[2][2] * v.z + a.m[3][2] * v.w,
+             a.m[0][3] * v.x + a.m[1][3] * v.y + a.m[2][3] * v.z + a.m[3][3] * v.w };
 }
+
+#ifdef R7_SIMD_SSE
+/* SSE mat4f * vec4f: result = col0 * x + col1 * y + col2 * z + col3 * w */
+[[nodiscard]] constexpr vec4<float> operator*(const matrix4x4<float>& a, const vec4<float>& v) noexcept {
+    if (std::is_constant_evaluated()) {
+        return { a.m[0][0] * v.x + a.m[1][0] * v.y + a.m[2][0] * v.z + a.m[3][0] * v.w,
+                 a.m[0][1] * v.x + a.m[1][1] * v.y + a.m[2][1] * v.z + a.m[3][1] * v.w,
+                 a.m[0][2] * v.x + a.m[1][2] * v.y + a.m[2][2] * v.z + a.m[3][2] * v.w,
+                 a.m[0][3] * v.x + a.m[1][3] * v.y + a.m[2][3] * v.z + a.m[3][3] * v.w };
+    }
+    __m128 c = _mm_mul_ps(_mm_loadu_ps(a.m[0]), _mm_set1_ps(v.x));
+    c = _mm_add_ps(c, _mm_mul_ps(_mm_loadu_ps(a.m[1]), _mm_set1_ps(v.y)));
+    c = _mm_add_ps(c, _mm_mul_ps(_mm_loadu_ps(a.m[2]), _mm_set1_ps(v.z)));
+    c = _mm_add_ps(c, _mm_mul_ps(_mm_loadu_ps(a.m[3]), _mm_set1_ps(v.w)));
+    float out[4];
+    _mm_storeu_ps(out, c);
+    return { out[0], out[1], out[2], out[3] };
+}
+#endif
 
 /* point: w = 1, bottom row ignored (affine matrices) */
 SCALTNDCX vec3<t> transformPoint(const matrix4x4<t>& a, const vec3<t>& p) noexcept {
-    return { a.m[0][0] * p.x + a.m[0][1] * p.y + a.m[0][2] * p.z + a.m[0][3],
-             a.m[1][0] * p.x + a.m[1][1] * p.y + a.m[1][2] * p.z + a.m[1][3],
-             a.m[2][0] * p.x + a.m[2][1] * p.y + a.m[2][2] * p.z + a.m[2][3] };
+    return { a.m[0][0] * p.x + a.m[1][0] * p.y + a.m[2][0] * p.z + a.m[3][0],
+             a.m[0][1] * p.x + a.m[1][1] * p.y + a.m[2][1] * p.z + a.m[3][1],
+             a.m[0][2] * p.x + a.m[1][2] * p.y + a.m[2][2] * p.z + a.m[3][2] };
 }
 /* direction: w = 0, translation ignored */
 SCALTNDCX vec3<t> transformVector(const matrix4x4<t>& a, const vec3<t>& v) noexcept {
-    return { a.m[0][0] * v.x + a.m[0][1] * v.y + a.m[0][2] * v.z,
-             a.m[1][0] * v.x + a.m[1][1] * v.y + a.m[1][2] * v.z,
-             a.m[2][0] * v.x + a.m[2][1] * v.y + a.m[2][2] * v.z };
+    return { a.m[0][0] * v.x + a.m[1][0] * v.y + a.m[2][0] * v.z,
+             a.m[0][1] * v.x + a.m[1][1] * v.y + a.m[2][1] * v.z,
+             a.m[0][2] * v.x + a.m[1][2] * v.y + a.m[2][2] * v.z };
 }
 /* full projective transform: w = 1, then divide by the resulting w (zero vector if w == 0) */
 FLTTNDCX vec3<t> projectPoint(const matrix4x4<t>& a, const vec3<t>& p) noexcept {
@@ -702,7 +758,7 @@ FLTTNDCX vec3<t> projectPoint(const matrix4x4<t>& a, const vec3<t>& p) noexcept 
 TMNDCX mt transpose(const mt& a) noexcept {
     mt r{};
     for (std::size_t i = 0; i < matDimOf<mt>; ++i)
-        for (std::size_t j = 0; j < matDimOf<mt>; ++j) r.m[i][j] = a.m[j][i];
+        for (std::size_t j = 0; j < matDimOf<mt>; ++j) r.m[j][i] = a.m[i][j];
     return r;
 }
 TMNDCX matScalarOf<mt> trace(const mt& a) noexcept {
@@ -712,51 +768,51 @@ TMNDCX matScalarOf<mt> trace(const mt& a) noexcept {
 }
 
 SCALTNDCX t determinant(const matrix2x2<t>& a) noexcept {
-    return a.m[0][0] * a.m[1][1] - a.m[0][1] * a.m[1][0];
+    return a.m[0][0] * a.m[1][1] - a.m[1][0] * a.m[0][1];
 }
 SCALTNDCX t determinant(const matrix3x3<t>& a) noexcept {
-    return a.m[0][0] * (a.m[1][1] * a.m[2][2] - a.m[1][2] * a.m[2][1])
-         - a.m[0][1] * (a.m[1][0] * a.m[2][2] - a.m[1][2] * a.m[2][0])
-         + a.m[0][2] * (a.m[1][0] * a.m[2][1] - a.m[1][1] * a.m[2][0]);
+    return a.m[0][0] * (a.m[1][1] * a.m[2][2] - a.m[2][1] * a.m[1][2])
+        - a.m[1][0] * (a.m[0][1] * a.m[2][2] - a.m[2][1] * a.m[0][2])
+        + a.m[2][0] * (a.m[0][1] * a.m[1][2] - a.m[1][1] * a.m[0][2]);
 }
 /* Laplace expansion along 2x2 sub-determinants of the top and bottom row pairs */
 SCALTNDCX t determinant(const matrix4x4<t>& a) noexcept {
     const auto& m = a.m;
-    const t s0 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-    const t s1 = m[0][0] * m[1][2] - m[0][2] * m[1][0];
-    const t s2 = m[0][0] * m[1][3] - m[0][3] * m[1][0];
-    const t s3 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
-    const t s4 = m[0][1] * m[1][3] - m[0][3] * m[1][1];
-    const t s5 = m[0][2] * m[1][3] - m[0][3] * m[1][2];
-    const t c5 = m[2][2] * m[3][3] - m[2][3] * m[3][2];
-    const t c4 = m[2][1] * m[3][3] - m[2][3] * m[3][1];
-    const t c3 = m[2][1] * m[3][2] - m[2][2] * m[3][1];
-    const t c2 = m[2][0] * m[3][3] - m[2][3] * m[3][0];
-    const t c1 = m[2][0] * m[3][2] - m[2][2] * m[3][0];
-    const t c0 = m[2][0] * m[3][1] - m[2][1] * m[3][0];
+    const t s0 = m[0][0] * m[1][1] - m[1][0] * m[0][1];
+    const t s1 = m[0][0] * m[2][1] - m[2][0] * m[0][1];
+    const t s2 = m[0][0] * m[3][1] - m[3][0] * m[0][1];
+    const t s3 = m[1][0] * m[2][1] - m[2][0] * m[1][1];
+    const t s4 = m[1][0] * m[3][1] - m[3][0] * m[1][1];
+    const t s5 = m[2][0] * m[3][1] - m[3][0] * m[2][1];
+    const t c5 = m[2][2] * m[3][3] - m[3][2] * m[2][3];
+    const t c4 = m[1][2] * m[3][3] - m[3][2] * m[1][3];
+    const t c3 = m[1][2] * m[2][3] - m[2][2] * m[1][3];
+    const t c2 = m[0][2] * m[3][3] - m[3][2] * m[0][3];
+    const t c1 = m[0][2] * m[2][3] - m[2][2] * m[0][3];
+    const t c0 = m[0][2] * m[1][3] - m[1][2] * m[0][3];
     return s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0;
 }
 #pragma endregion
 #pragma region matrix conversion
 /* upper-left 3x3 of a 4x4 (drops translation and the bottom row) */
 SCALTNDCX matrix3x3<t> toMat3(const matrix4x4<t>& a) noexcept {
-    return {{ { a.m[0][0], a.m[0][1], a.m[0][2] },
-              { a.m[1][0], a.m[1][1], a.m[1][2] },
-              { a.m[2][0], a.m[2][1], a.m[2][2] } }};
+    return matrix3x3<t>::fromRows({ { a.m[0][0], a.m[1][0], a.m[2][0] },
+              { a.m[0][1], a.m[1][1], a.m[2][1] },
+              { a.m[0][2], a.m[1][2], a.m[2][2] } });
 }
 /* embeds a 3x3 in the upper-left of an identity 4x4 */
 SCALTNDCX matrix4x4<t> toMat4(const matrix3x3<t>& a) noexcept {
-    return {{ { a.m[0][0], a.m[0][1], a.m[0][2], t(0) },
-              { a.m[1][0], a.m[1][1], a.m[1][2], t(0) },
-              { a.m[2][0], a.m[2][1], a.m[2][2], t(0) },
-              { t(0),      t(0),      t(0),      t(1) } }};
+    return matrix4x4<t>::fromRows({ { a.m[0][0], a.m[1][0], a.m[2][0], t(0) },
+              { a.m[0][1], a.m[1][1], a.m[2][1], t(0) },
+              { a.m[0][2], a.m[1][2], a.m[2][2], t(0) },
+              { t(0),      t(0),      t(0),      t(1) } });
 }
 /* rotation matrix of a unit quaternion */
 FLTTNDCX matrix3x3<t> toMat3(const quat<t>& q) noexcept {
     const t x = q.x, y = q.y, z = q.z, w = q.w;
-    return {{ { t(1) - t(2) * (y * y + z * z), t(2) * (x * y - z * w),        t(2) * (x * z + y * w) },
+    return matrix3x3<t>::fromRows({ { t(1) - t(2) * (y * y + z * z), t(2) * (x * y - z * w),        t(2) * (x * z + y * w) },
               { t(2) * (x * y + z * w),        t(1) - t(2) * (x * x + z * z), t(2) * (y * z - x * w) },
-              { t(2) * (x * z - y * w),        t(2) * (y * z + x * w),        t(1) - t(2) * (x * x + y * y) } }};
+              { t(2) * (x * z - y * w),        t(2) * (y * z + x * w),        t(1) - t(2) * (x * x + y * y) } });
 }
 FLTTNDCX matrix4x4<t> toMat4(const quat<t>& q) noexcept { return toMat4(toMat3(q)); }
 
@@ -767,19 +823,19 @@ FLTTND quat<t> toQuat(const matrix3x3<t>& a) noexcept {
     quat<t> q{};
     if (tr > t(0)) {
         const t s = std::sqrt(tr + t(1)) * t(2);            // 4w
-        q = { (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s, s * t(0.25) };
+        q = { (m[1][2] - m[2][1]) / s, (m[2][0] - m[0][2]) / s, (m[0][1] - m[1][0]) / s, s * t(0.25) };
     }
     else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
         const t s = std::sqrt(t(1) + m[0][0] - m[1][1] - m[2][2]) * t(2); // 4x
-        q = { s * t(0.25), (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s, (m[2][1] - m[1][2]) / s };
+        q = { s * t(0.25), (m[1][0] + m[0][1]) / s, (m[2][0] + m[0][2]) / s, (m[1][2] - m[2][1]) / s };
     }
     else if (m[1][1] > m[2][2]) {
         const t s = std::sqrt(t(1) + m[1][1] - m[0][0] - m[2][2]) * t(2); // 4y
-        q = { (m[0][1] + m[1][0]) / s, s * t(0.25), (m[1][2] + m[2][1]) / s, (m[0][2] - m[2][0]) / s };
+        q = { (m[1][0] + m[0][1]) / s, s * t(0.25), (m[2][1] + m[1][2]) / s, (m[2][0] - m[0][2]) / s };
     }
     else {
         const t s = std::sqrt(t(1) + m[2][2] - m[0][0] - m[1][1]) * t(2); // 4z
-        q = { (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, s * t(0.25), (m[1][0] - m[0][1]) / s };
+        q = { (m[2][0] + m[0][2]) / s, (m[2][1] + m[1][2]) / s, s * t(0.25), (m[0][1] - m[1][0]) / s };
     }
     return normalize(q);
 }
@@ -792,59 +848,59 @@ FLTTNDCX bool tryInverse(const matrix2x2<t>& a, matrix2x2<t>& out) noexcept {
     const t det = determinant(a);
     if (det == t(0)) return false;
     const t inv = t(1) / det;
-    out = {{ {  a.m[1][1] * inv, -a.m[0][1] * inv },
-             { -a.m[1][0] * inv,  a.m[0][0] * inv } }};
+    out = matrix2x2<t>::fromRows({ {  a.m[1][1] * inv, -a.m[1][0] * inv },
+             { -a.m[0][1] * inv,  a.m[0][0] * inv } });
     return true;
 }
 /* inverse = cross products of the rows, divided by the determinant */
 FLTTNDCX bool tryInverse(const matrix3x3<t>& a, matrix3x3<t>& out) noexcept {
-    const vec3<t> r0{ a.m[0][0], a.m[0][1], a.m[0][2] };
-    const vec3<t> r1{ a.m[1][0], a.m[1][1], a.m[1][2] };
-    const vec3<t> r2{ a.m[2][0], a.m[2][1], a.m[2][2] };
+    const vec3<t> r0{ a.m[0][0], a.m[1][0], a.m[2][0] };
+    const vec3<t> r1{ a.m[0][1], a.m[1][1], a.m[2][1] };
+    const vec3<t> r2{ a.m[0][2], a.m[1][2], a.m[2][2] };
     const vec3<t> c0 = cross(r1, r2), c1 = cross(r2, r0), c2 = cross(r0, r1);
     const t det = dot(r0, c0);
     if (det == t(0)) return false;
     const t inv = t(1) / det;
-    out = {{ { c0.x * inv, c1.x * inv, c2.x * inv },
+    out = matrix3x3<t>::fromRows({ { c0.x * inv, c1.x * inv, c2.x * inv },
              { c0.y * inv, c1.y * inv, c2.y * inv },
-             { c0.z * inv, c1.z * inv, c2.z * inv } }};
+             { c0.z * inv, c1.z * inv, c2.z * inv } });
     return true;
 }
 FLTTNDCX bool tryInverse(const matrix4x4<t>& a, matrix4x4<t>& out) noexcept {
     const auto& m = a.m;
-    const t s0 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-    const t s1 = m[0][0] * m[1][2] - m[0][2] * m[1][0];
-    const t s2 = m[0][0] * m[1][3] - m[0][3] * m[1][0];
-    const t s3 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
-    const t s4 = m[0][1] * m[1][3] - m[0][3] * m[1][1];
-    const t s5 = m[0][2] * m[1][3] - m[0][3] * m[1][2];
-    const t c5 = m[2][2] * m[3][3] - m[2][3] * m[3][2];
-    const t c4 = m[2][1] * m[3][3] - m[2][3] * m[3][1];
-    const t c3 = m[2][1] * m[3][2] - m[2][2] * m[3][1];
-    const t c2 = m[2][0] * m[3][3] - m[2][3] * m[3][0];
-    const t c1 = m[2][0] * m[3][2] - m[2][2] * m[3][0];
-    const t c0 = m[2][0] * m[3][1] - m[2][1] * m[3][0];
+    const t s0 = m[0][0] * m[1][1] - m[1][0] * m[0][1];
+    const t s1 = m[0][0] * m[2][1] - m[2][0] * m[0][1];
+    const t s2 = m[0][0] * m[3][1] - m[3][0] * m[0][1];
+    const t s3 = m[1][0] * m[2][1] - m[2][0] * m[1][1];
+    const t s4 = m[1][0] * m[3][1] - m[3][0] * m[1][1];
+    const t s5 = m[2][0] * m[3][1] - m[3][0] * m[2][1];
+    const t c5 = m[2][2] * m[3][3] - m[3][2] * m[2][3];
+    const t c4 = m[1][2] * m[3][3] - m[3][2] * m[1][3];
+    const t c3 = m[1][2] * m[2][3] - m[2][2] * m[1][3];
+    const t c2 = m[0][2] * m[3][3] - m[3][2] * m[0][3];
+    const t c1 = m[0][2] * m[2][3] - m[2][2] * m[0][3];
+    const t c0 = m[0][2] * m[1][3] - m[1][2] * m[0][3];
     const t det = s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0;
     if (det == t(0)) return false;
     const t d = t(1) / det;
-    out = {{
-        { ( m[1][1] * c5 - m[1][2] * c4 + m[1][3] * c3) * d,
-          (-m[0][1] * c5 + m[0][2] * c4 - m[0][3] * c3) * d,
-          ( m[3][1] * s5 - m[3][2] * s4 + m[3][3] * s3) * d,
-          (-m[2][1] * s5 + m[2][2] * s4 - m[2][3] * s3) * d },
-        { (-m[1][0] * c5 + m[1][2] * c2 - m[1][3] * c1) * d,
-          ( m[0][0] * c5 - m[0][2] * c2 + m[0][3] * c1) * d,
-          (-m[3][0] * s5 + m[3][2] * s2 - m[3][3] * s1) * d,
-          ( m[2][0] * s5 - m[2][2] * s2 + m[2][3] * s1) * d },
-        { ( m[1][0] * c4 - m[1][1] * c2 + m[1][3] * c0) * d,
-          (-m[0][0] * c4 + m[0][1] * c2 - m[0][3] * c0) * d,
-          ( m[3][0] * s4 - m[3][1] * s2 + m[3][3] * s0) * d,
-          (-m[2][0] * s4 + m[2][1] * s2 - m[2][3] * s0) * d },
-        { (-m[1][0] * c3 + m[1][1] * c1 - m[1][2] * c0) * d,
-          ( m[0][0] * c3 - m[0][1] * c1 + m[0][2] * c0) * d,
-          (-m[3][0] * s3 + m[3][1] * s1 - m[3][2] * s0) * d,
-          ( m[2][0] * s3 - m[2][1] * s1 + m[2][2] * s0) * d }
-    }};
+    out = matrix4x4<t>::fromRows({
+        { (m[1][1] * c5 - m[2][1] * c4 + m[3][1] * c3) * d,
+          (-m[1][0] * c5 + m[2][0] * c4 - m[3][0] * c3) * d,
+          (m[1][3] * s5 - m[2][3] * s4 + m[3][3] * s3) * d,
+          (-m[1][2] * s5 + m[2][2] * s4 - m[3][2] * s3) * d },
+        { (-m[0][1] * c5 + m[2][1] * c2 - m[3][1] * c1) * d,
+          (m[0][0] * c5 - m[2][0] * c2 + m[3][0] * c1) * d,
+          (-m[0][3] * s5 + m[2][3] * s2 - m[3][3] * s1) * d,
+          (m[0][2] * s5 - m[2][2] * s2 + m[3][2] * s1) * d },
+        { (m[0][1] * c4 - m[1][1] * c2 + m[3][1] * c0) * d,
+          (-m[0][0] * c4 + m[1][0] * c2 - m[3][0] * c0) * d,
+          (m[0][3] * s4 - m[1][3] * s2 + m[3][3] * s0) * d,
+          (-m[0][2] * s4 + m[1][2] * s2 - m[3][2] * s0) * d },
+        { (-m[0][1] * c3 + m[1][1] * c1 - m[2][1] * c0) * d,
+          (m[0][0] * c3 - m[1][0] * c1 + m[2][0] * c0) * d,
+          (-m[0][3] * s3 + m[1][3] * s1 - m[2][3] * s0) * d,
+          (m[0][2] * s3 - m[1][2] * s1 + m[2][2] * s0) * d }
+    });
     return true;
 }
 
@@ -859,12 +915,12 @@ TMFLT [[nodiscard]] constexpr mt inverse(const mt& a) noexcept {
    translation / rotation / scaling. Not valid for projection matrices. */
 FLTTNDCX matrix4x4<t> inverseAffine(const matrix4x4<t>& a) noexcept {
     const matrix3x3<t> r = inverse(toMat3(a));
-    const vec3<t> p{ a.m[0][3], a.m[1][3], a.m[2][3] };
+    const vec3<t> p{ a.m[3][0], a.m[3][1], a.m[3][2] };
     const vec3<t> np = r * p;
     matrix4x4<t> out = toMat4(r);
-    out.m[0][3] = -np.x;
-    out.m[1][3] = -np.y;
-    out.m[2][3] = -np.z;
+    out.m[3][0] = -np.x;
+    out.m[3][1] = -np.y;
+    out.m[3][2] = -np.z;
     return out;
 }
 
@@ -876,7 +932,7 @@ FLTTNDCX matrix3x3<t> normalMatrix(const matrix4x4<t>& a) noexcept {
 #pragma region matrix factories
 FLTTNDCX matrix4x4<t> translation(const vec3<t>& p) noexcept {
     matrix4x4<t> r = matIdentity<matrix4x4<t>>();
-    r.m[0][3] = p.x; r.m[1][3] = p.y; r.m[2][3] = p.z;
+    r.m[3][0] = p.x; r.m[3][1] = p.y; r.m[3][2] = p.z;
     return r;
 }
 FLTTNDCX matrix4x4<t> scaling(const vec3<t>& s) noexcept {
@@ -889,24 +945,24 @@ FLTTNDCX matrix4x4<t> scaling(t s) noexcept { return scaling(vec3<t>{ s, s, s })
 /* counter-clockwise rotation about an axis (radians); right-handed */
 FLTTND matrix4x4<t> rotationX(t angle) noexcept {
     const t c = std::cos(angle), s = std::sin(angle);
-    return {{ { t(1), t(0), t(0), t(0) },
+    return matrix4x4<t>::fromRows({ { t(1), t(0), t(0), t(0) },
               { t(0), c,    -s,   t(0) },
               { t(0), s,    c,    t(0) },
-              { t(0), t(0), t(0), t(1) } }};
+              { t(0), t(0), t(0), t(1) } });
 }
 FLTTND matrix4x4<t> rotationY(t angle) noexcept {
     const t c = std::cos(angle), s = std::sin(angle);
-    return {{ { c,    t(0), s,    t(0) },
+    return matrix4x4<t>::fromRows({ { c,    t(0), s,    t(0) },
               { t(0), t(1), t(0), t(0) },
               { -s,   t(0), c,    t(0) },
-              { t(0), t(0), t(0), t(1) } }};
+              { t(0), t(0), t(0), t(1) } });
 }
 FLTTND matrix4x4<t> rotationZ(t angle) noexcept {
     const t c = std::cos(angle), s = std::sin(angle);
-    return {{ { c,    -s,   t(0), t(0) },
+    return matrix4x4<t>::fromRows({ { c,    -s,   t(0), t(0) },
               { s,    c,    t(0), t(0) },
               { t(0), t(0), t(1), t(0) },
-              { t(0), t(0), t(0), t(1) } }};
+              { t(0), t(0), t(0), t(1) } });
 }
 /* axis need not be normalized */
 FLTTND matrix4x4<t> rotation(const vec3<t>& axis, t angle) noexcept {
@@ -915,8 +971,8 @@ FLTTND matrix4x4<t> rotation(const vec3<t>& axis, t angle) noexcept {
 /* 2D counter-clockwise rotation (radians) */
 FLTTND matrix2x2<t> rotation2D(t angle) noexcept {
     const t c = std::cos(angle), s = std::sin(angle);
-    return {{ { c, -s },
-              { s,  c } }};
+    return matrix2x2<t>::fromRows({ { c, -s },
+              { s,  c } });
 }
 
 /* Splits an affine T*R*S matrix back into position / rotation / scale. Exact when there is no shear.
@@ -924,10 +980,10 @@ FLTTND matrix2x2<t> rotation2D(t angle) noexcept {
    rotation can't be recovered and is left as identity. */
 FLTTND transform<t> decompose(const matrix4x4<t>& a) noexcept {
     transform<t> out{};
-    out.position = { a.m[0][3], a.m[1][3], a.m[2][3] };
-    const vec3<t> c0{ a.m[0][0], a.m[1][0], a.m[2][0] };
-    const vec3<t> c1{ a.m[0][1], a.m[1][1], a.m[2][1] };
-    const vec3<t> c2{ a.m[0][2], a.m[1][2], a.m[2][2] };
+    out.position = { a.m[3][0], a.m[3][1], a.m[3][2] };
+    const vec3<t> c0{ a.m[0][0], a.m[0][1], a.m[0][2] };
+    const vec3<t> c1{ a.m[1][0], a.m[1][1], a.m[1][2] };
+    const vec3<t> c2{ a.m[2][0], a.m[2][1], a.m[2][2] };
     vec3<t> s{ length(c0), length(c1), length(c2) };
     if (determinant(toMat3(a)) < t(0)) s.x = -s.x;
     out.scale = s;
@@ -945,10 +1001,10 @@ FLTTND matrix4x4<t> lookAt(const vec3<t>& eye, const vec3<t>& target, const vec3
     const vec3<t> f = normalize(target - eye);
     const vec3<t> s = normalize(cross(f, up));
     const vec3<t> u = cross(s, f);
-    return {{ {  s.x,  s.y,  s.z, -dot(s, eye) },
+    return matrix4x4<t>::fromRows({ {  s.x,  s.y,  s.z, -dot(s, eye) },
               {  u.x,  u.y,  u.z, -dot(u, eye) },
               { -f.x, -f.y, -f.z,  dot(f, eye) },
-              { t(0), t(0), t(0),  t(1) } }};
+              { t(0), t(0), t(0),  t(1) } });
 }
 
 /* fovY in radians. OpenGL clip space: z in [-1,1] */
@@ -958,8 +1014,8 @@ FLTTND matrix4x4<t> perspective(t fovY, t aspect, t zNear, t zFar) noexcept {
     r.m[0][0] = f / aspect;
     r.m[1][1] = f;
     r.m[2][2] = -(zFar + zNear) / (zFar - zNear);
-    r.m[2][3] = -(t(2) * zFar * zNear) / (zFar - zNear);
-    r.m[3][2] = t(-1);
+    r.m[3][2] = -(t(2) * zFar * zNear) / (zFar - zNear);
+    r.m[2][3] = t(-1);
     return r;
 }
 /* zero-to-one depth (Vulkan / D3D / Metal) */
@@ -969,8 +1025,8 @@ FLTTND matrix4x4<t> perspectiveZO(t fovY, t aspect, t zNear, t zFar) noexcept {
     r.m[0][0] = f / aspect;
     r.m[1][1] = f;
     r.m[2][2] = zFar / (zNear - zFar);
-    r.m[2][3] = (zFar * zNear) / (zNear - zFar);
-    r.m[3][2] = t(-1);
+    r.m[3][2] = (zFar * zNear) / (zNear - zFar);
+    r.m[2][3] = t(-1);
     return r;
 }
 
@@ -980,9 +1036,9 @@ FLTTNDCX matrix4x4<t> orthographic(t left, t right, t bottom, t top, t zNear, t 
     r.m[0][0] = t(2) / (right - left);
     r.m[1][1] = t(2) / (top - bottom);
     r.m[2][2] = t(-2) / (zFar - zNear);
-    r.m[0][3] = -(right + left) / (right - left);
-    r.m[1][3] = -(top + bottom) / (top - bottom);
-    r.m[2][3] = -(zFar + zNear) / (zFar - zNear);
+    r.m[3][0] = -(right + left) / (right - left);
+    r.m[3][1] = -(top + bottom) / (top - bottom);
+    r.m[3][2] = -(zFar + zNear) / (zFar - zNear);
     r.m[3][3] = t(1);
     return r;
 }
@@ -990,9 +1046,33 @@ FLTTNDCX matrix4x4<t> orthographic(t left, t right, t bottom, t top, t zNear, t 
 FLTTNDCX matrix4x4<t> orthographicZO(t left, t right, t bottom, t top, t zNear, t zFar) noexcept {
     matrix4x4<t> r = orthographic(left, right, bottom, top, zNear, zFar);
     r.m[2][2] = t(-1) / (zFar - zNear);
-    r.m[2][3] = -zNear / (zFar - zNear);
+    r.m[3][2] = -zNear / (zFar - zNear);
     return r;
 }
+#pragma endregion
+#pragma region matrix translation
+
+//removed inline on function with for loop.
+//rolled out for loops so no overhead
+FLTTNDCX matrix4x4<t> translate(const matrix4x4<t>& a, const vec3<t> v) noexcept {
+    matrix4x4<t> r = a;   // columns 0-2 unchanged
+    r.m[3][0] = a.m[0][0] * v.x + a.m[1][0] * v.y + a.m[2][0] * v.z + a.m[3][0];
+    r.m[3][1] = a.m[0][1] * v.x + a.m[1][1] * v.y + a.m[2][1] * v.z + a.m[3][1];
+    r.m[3][2] = a.m[0][2] * v.x + a.m[1][2] * v.y + a.m[2][2] * v.z + a.m[3][2];
+    r.m[3][3] = a.m[0][3] * v.x + a.m[1][3] * v.y + a.m[2][3] * v.z + a.m[3][3];
+    return r;
+}
+FLTTND inline matrix4x4<t> rotate(const matrix4x4<t>& a, t angle, const vec3<t> axis)noexcept {
+    return a * rotation(axis, angle);
+}
+FLTTNDCX matrix4x4<t> scale(const matrix4x4<t>& a, const vec3<t> v) noexcept {
+    matrix4x4<t> r = a;   // column 3 unchanged
+    r.m[0][0] = a.m[0][0] * v.x; r.m[0][1] = a.m[0][1] * v.x; r.m[0][2] = a.m[0][2] * v.x; r.m[0][3] = a.m[0][3] * v.x;
+    r.m[1][0] = a.m[1][0] * v.y; r.m[1][1] = a.m[1][1] * v.y; r.m[1][2] = a.m[1][2] * v.y; r.m[1][3] = a.m[1][3] * v.y;
+    r.m[2][0] = a.m[2][0] * v.z; r.m[2][1] = a.m[2][1] * v.z; r.m[2][2] = a.m[2][2] * v.z; r.m[2][3] = a.m[2][3] * v.z;
+    return r;
+}
+
 #pragma endregion
 #pragma endregion
 #pragma region vectorMathExtension
@@ -1165,3 +1245,4 @@ typedef vec4<float> vec4f; typedef vec4<double> vec4d; typedef vec4<int> vec4i; 
 #pragma endregion
 #pragma endregion
 #pragma endregion
+}
