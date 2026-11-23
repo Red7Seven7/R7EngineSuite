@@ -15,22 +15,13 @@
 #  endif
 #endif
 
-#include <string>
-#include <vector>
-#include <filesystem>
-#include <fstream>
-#include <system_error>
-#include <expected>
-#include <mutex>
-#include <queue>
-#include <thread>
-#include <future>
-#include <atomic>
-#include <iostream>
-#include <glm/glm.hpp>
+
 #include <volk.h>
 #include <GLFW/glfw3.h>
 #include "R7UserInterface.h"
+import std;
+import R7Data;
+
 
 namespace R7 {
 
@@ -211,12 +202,12 @@ namespace R7 {
     // Embedded FileManagerPanel (Moved directly into R7FileManager.h)
     // ==========================================
     namespace UI_Panel_Atlas {
-        static constexpr glm::vec2 ArrowUpMin = { 0.1875f, 0.125f };
-        static constexpr glm::vec2 ArrowUpMax = { 0.2500f, 0.1875f };
-        static constexpr glm::vec2 FileIconMin = { 0.0000f, 0.0625f };
-        static constexpr glm::vec2 FileIconMax = { 0.0625f, 0.1250f };
-        static constexpr glm::vec2 PanelBgMin = { 0.7500f, 0.0000f };
-        static constexpr glm::vec2 PanelBgMax = { 0.8125f, 0.0625f };
+        static constexpr vec2f ArrowUpMin = { 0.1875f, 0.125f };
+        static constexpr vec2f ArrowUpMax = { 0.2500f, 0.1875f };
+        static constexpr vec2f FileIconMin = { 0.0000f, 0.0625f };
+        static constexpr vec2f FileIconMax = { 0.0625f, 0.1250f };
+        static constexpr vec2f PanelBgMin = { 0.7500f, 0.0000f };
+        static constexpr vec2f PanelBgMax = { 0.8125f, 0.0625f };
     }
 
     struct FileEntry {
@@ -293,8 +284,8 @@ namespace R7 {
                 float rowY = listY + (i * rowHeight);
                 bool isSelected = (entryIndex == m_selectedIndex);
 
-                glm::vec4 rowBg = isSelected ? glm::vec4(0.2f, 0.35f, 0.55f, 1.0f)
-                    : ((i % 2 == 0) ? glm::vec4(0.12f, 0.13f, 0.16f, 1.0f) : glm::vec4(0.10f, 0.11f, 0.14f, 1.0f));
+                vec4f rowBg = isSelected ? vec4f(0.2f, 0.35f, 0.55f, 1.0f)
+                    : ((i % 2 == 0) ? vec4f(0.12f, 0.13f, 0.16f, 1.0f) : vec4f(0.10f, 0.11f, 0.14f, 1.0f));
 
                 if (ui.DrawButton(listX + 2.0f, rowY + 2.0f, listW - 4.0f, rowHeight - 2.0f, "", rowBg)) {
                     m_selectedIndex = entryIndex;
@@ -305,7 +296,7 @@ namespace R7 {
                     }
                 }
 
-                glm::vec4 iconTint = entry.isDirectory ? glm::vec4(1.0f, 0.8f, 0.3f, 1.0f) : glm::vec4(0.6f, 0.75f, 0.9f, 1.0f);
+                vec4f iconTint = entry.isDirectory ? vec4f(1.0f, 0.8f, 0.3f, 1.0f) : vec4f(0.6f, 0.75f, 0.9f, 1.0f);
                 ui.DrawImage(listX + 8.0f, rowY + 5.0f, 16.0f, 16.0f, this->m_texture, iconTint, UI_Panel_Atlas::FileIconMin, UI_Panel_Atlas::FileIconMax);
 
                 std::string label = entry.name + (entry.isDirectory ? "/" : "");

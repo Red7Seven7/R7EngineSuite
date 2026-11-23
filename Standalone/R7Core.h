@@ -1,29 +1,14 @@
 #pragma once
-#include <vector>
-#include <string>
-#include <fstream> 
-#include <iostream>
-#include <array>
-#include <atomic>
-#include <type_traits>
-#include <expected>
-#include <filesystem>
-#include <algorithm>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/component_wise.hpp>
-#include <R7DataStream.h>
-#include "MeshCore.h"
+
 #include "VulkanContext.h"
 #include <R7FileManager.h> 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
-#include "R7WorldFramework.h"
-#include "R7Backend.h"
 #include "R7Font.h"
 #include "R7UserInterface.h"
-
+import std;
+import R7Data;
+import R7WorldFramework;
 // Forward declare R7Editor functions used in Core::Initialize to stop circular include
 namespace R7::R7Editor {
     void Initialize(GLFWwindow* window, VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamily, VkQueue queue, VkCommandPool commandPool);
@@ -63,7 +48,6 @@ namespace R7 {
                 std::cerr << "[Core Warning] Failed to load default font from: " << Font::s_defaultFontPath << "\n";
             }
 
-            R7::R7Backend::Init();
 
 #ifdef R7_EDITOR
             R7::R7Editor::Initialize(window, instance, device, physicalDevice,
@@ -71,10 +55,6 @@ namespace R7 {
 #endif
         }
         inline void Update() {
-            R7::R7Backend::Update();
-        }
-        inline void DestroyBackend() {
-            R7::R7Backend::Shutdown();
         }
         inline void DestroyEditor() {
 #ifdef R7_EDITOR
@@ -83,7 +63,6 @@ namespace R7 {
         }
         inline void Cleanup() {
             DestroyEditor();
-            DestroyBackend();
         }
     }
 }

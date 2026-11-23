@@ -3,9 +3,6 @@
 // R7AssetManager - Thread-Safe Standalone Asset Manager (Namespace)
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 //
-// Deliberately UI-free: anything (editor, renderer, core) may include this
-// without creating circular dependencies. The asset browser panel lives in
-// the editor.
 // ==========================================================
 
 #if __has_include("R7FileManager.h")
@@ -14,16 +11,7 @@
 #error "R7AssetManager requires R7FileManager.h to be included and present in your header search paths."
 #endif
 
-#include <string>
-#include <unordered_map>
-#include <memory>
-#include <mutex>
-#include <expected>
-#include <filesystem>
-#include <vector>
-#include <typeindex>
-#include <type_traits>
-#include <cstdint>
+
 
 #if __has_include(<vulkan/vulkan.h>)
 #include <vulkan/vulkan.h>
@@ -31,7 +19,7 @@
 #else
 #define R7_HAS_VULKAN 0
 #endif
-
+import std;
 namespace R7::AssetManager {
 
     enum class AssetError {

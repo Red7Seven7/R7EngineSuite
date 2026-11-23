@@ -4,7 +4,7 @@
 // Copyright (c) 2026 RedSeven (Licensed under the MIT License)
 // ==========================================================
 
-/*
+/*	
 * How to use
 * inherit this on any class.
 * call R7Interactable::Touch() for base features

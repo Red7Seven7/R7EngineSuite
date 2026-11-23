@@ -1,9 +1,7 @@
 #pragma once
-#include <string>
-#include <iostream>
-#include <filesystem>
-#include "R7AssetManager.h"
 
+#include "R7AssetManager.h"
+import std;
 namespace R7 {
     namespace Core
     {
