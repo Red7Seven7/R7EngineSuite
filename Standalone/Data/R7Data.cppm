@@ -1232,6 +1232,99 @@ typedef vec3<float> vec3f; typedef vec3<double> vec3d; typedef vec3<int> vec3i; 
 typedef vec4<float> vec4f; typedef vec4<double> vec4d; typedef vec4<int> vec4i; typedef vec4<unsigned> vec4u;
 #pragma endregion
 #pragma endregion
+#pragma region SafeMath
+template<scalar S>S SafeAdd(S a, S b, S& overflow) noexcept {
+    static_assert(std::is_arithmetic_v<S> && !std::is_same_v<S, bool>,
+        "S must be an arithmetic scalar type (not bool)");
+    S out{};
+    bool bad;
+    if constexpr (std::is_floating_point_v<S>) {
+        out = a + b;
+        bad = !std::isfinite(out);
+    }
+    else if constexpr (std::is_unsigned_v<S>) {
+        out = static_cast<S>(a + b);
+        bad = out < a;                       // wrapped around
+    }
+    else {
+        constexpr S lo = std::numeric_limits<S>::lowest();
+        constexpr S hi = std::numeric_limits<S>::max();
+        bad = b > 0 ? a > hi - b : a < lo - b;   // check before adding, so no UB
+        if (!bad) out = static_cast<S>(a + b);
+    }
+    overflow = static_cast<S>(bad);
+    return bad ? S{} : out;
+}
+template<scalar S>S SafeAdd(S a, S b, S lo, S hi, S& overflow) noexcept {
+    static_assert(std::is_arithmetic_v<S> && !std::is_same_v<S, bool>,
+        "S must be an arithmetic scalar type (not bool)");
+    S out{};
+    bool bad;
+    if constexpr (std::is_floating_point_v<S>) {
+        out = a + b;
+        bad = !std::isfinite(out);
+    }
+    else if constexpr (std::is_unsigned_v<S>) {
+        out = static_cast<S>(a + b);
+        bad = out < a;                           // wrapped around
+    }
+    else {
+        constexpr S tlo = std::numeric_limits<S>::lowest();
+        constexpr S thi = std::numeric_limits<S>::max();
+        bad = b > 0 ? a > thi - b : a < tlo - b;
+        if (!bad) out = static_cast<S>(a + b);
+    }
+    bad = bad || out < lo || out > hi;           // user range (short-circuits if type overflowed)
+    overflow = static_cast<S>(bad);
+    return bad ? S{} : out;
+}
+template<scalar S>S SafeSub(S a, S b, S& overflow) noexcept {
+    static_assert(std::is_arithmetic_v<S> && !std::is_same_v<S, bool>,
+        "S must be an arithmetic scalar type (not bool)");
+    S out{};
+    bool bad;
+    if constexpr (std::is_floating_point_v<S>) {
+        out = a - b;
+        bad = !std::isfinite(out);
+    }
+    else if constexpr (std::is_unsigned_v<S>) {
+        bad = b > a;                             // result would be negative
+        if (!bad) out = static_cast<S>(a - b);
+    }
+    else {
+        constexpr S lo = std::numeric_limits<S>::lowest();
+        constexpr S hi = std::numeric_limits<S>::max();
+        bad = b > 0 ? a < lo + b : a > hi + b;   // check before subtracting, so no UB
+        if (!bad) out = static_cast<S>(a - b);
+    }
+    overflow = static_cast<S>(bad);
+    return bad ? S{} : out;
+}
+template<scalar S>S SafeSub(S a, S b, S lo, S hi, S& overflow) noexcept {
+    static_assert(std::is_arithmetic_v<S> && !std::is_same_v<S, bool>,
+        "S must be an arithmetic scalar type (not bool)");
+    S out{};
+    bool bad;
+    if constexpr (std::is_floating_point_v<S>) {
+        out = a - b;
+        bad = !std::isfinite(out);
+    }
+    else if constexpr (std::is_unsigned_v<S>) {
+        bad = b > a;
+        if (!bad) out = static_cast<S>(a - b);
+    }
+    else {
+        constexpr S tlo = std::numeric_limits<S>::lowest();
+        constexpr S thi = std::numeric_limits<S>::max();
+        bad = b > 0 ? a < tlo + b : a > thi + b;
+        if (!bad) out = static_cast<S>(a - b);
+    }
+    bad = bad || out < lo || out > hi;
+    overflow = static_cast<S>(bad);
+    return bad ? S{} : out;
+}
+/*more coming soon*/
+#pragma endregion
 #pragma endregion
 #pragma region VertexData
 struct BaseVertex {
